@@ -26,6 +26,8 @@ Useful switches:
 - `-KeepWSL` - skip disabling WSL/VirtualMachinePlatform
 - `-SkipVerify` - apply only, no auto-verify
 - `-VerifyOnly` - run built-in verification only
+- `-NoRestore` - skip restore-point creation in `Extreme`
+- `-h` / `-help` / `-man` - show manual usage
 
 ## One-Run From GitHub
 Default one-liner (Safe mode):
@@ -49,6 +51,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create
 Verify only:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -VerifyOnly -v"
+```
+
+Manual / Help:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -h"
 ```
 
 ## What It Changes

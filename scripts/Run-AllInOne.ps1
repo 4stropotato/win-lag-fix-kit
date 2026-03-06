@@ -8,7 +8,11 @@ param(
     [switch]$VerboseOutput,
     [switch]$KeepWSL,
     [switch]$SkipVerify,
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+    [Alias("nr")]
+    [switch]$NoRestore,
+    [Alias("h","help","man","?")]
+    [switch]$Manual
 )
 
 Set-StrictMode -Version Latest
@@ -102,10 +106,39 @@ function Show-Banner {
         }
     }
     Write-Host (Paint "                                   USHIE ONE-SHOT LATENCY OPTIMIZER" $S.NeonPink)
+    $runMode = if ($Manual) { "MANUAL / HELP" } elseif ($VerifyOnly) { "VERIFY-ONLY (READ-ONLY)" } else { "APPLY ALL-IN-ONE" }
     Write-Host (Paint "                                   NO PERSISTENT BACKGROUND SERVICES" $S.NeonPink)
     Write-Host (Paint ("                                   MODE: " + $script:RunProfile + "   VERBOSE: " + $(if ($VerboseOutput) { "ON" } else { "OFF" })) $S.Slate)
-    Write-Host (Paint "                                   RUN MODE: APPLY ALL-IN-ONE" $S.Slate)
+    Write-Host (Paint ("                                   RUN MODE: " + $runMode) $S.Slate)
+    if ($NoRestore -and $script:RunProfile -eq "Extreme") {
+        Write-Host (Paint "                                   EXTREME RESTOREPOINT: SKIP (-NoRestore)" $S.Yellow)
+    }
     Write-Host ""
+}
+
+function Show-Manual {
+    Write-Host (Paint "Usage:" $S.NeonBlue)
+    Write-Host "  .\scripts\Run-AllInOne.ps1 [-m Safe|Extreme] [-v] [-Dns Auto|Cloudflare|Google|Quad9|OpenDNS|AdGuard|ControlD|DNSSB|Comodo] [-DnsServers ip,ip,...]"
+    Write-Host "  .\scripts\Run-AllInOne.ps1 -VerifyOnly [-v]"
+    Write-Host "  .\scripts\Run-AllInOne.ps1 -h"
+    Write-Host ""
+    Write-Host (Paint "Main switches:" $S.NeonBlue)
+    Write-Host "  -m              Profile mode (Safe default, Extreme for max tuning)"
+    Write-Host "  -v              Verbose/full view output"
+    Write-Host "  -Dns            DNS preset (Auto default)"
+    Write-Host "  -DnsServers     Manual DNS override list (highest priority)"
+    Write-Host "  -KeepWSL        Do not disable WSL / VirtualMachinePlatform"
+    Write-Host "  -SkipVerify     Apply changes without auto verify"
+    Write-Host "  -VerifyOnly     Run checks only (read-only)"
+    Write-Host "  -NoRestore      Skip restore-point creation in Extreme mode"
+    Write-Host "  -h / -help / -man  Show this manual"
+    Write-Host ""
+    Write-Host (Paint "One-liner (Safe):" $S.NeonBlue)
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe"""
+    Write-Host (Paint "One-liner (Extreme):" $S.NeonBlue)
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Extreme -v"""
+    Write-Host (Paint "One-liner (Help):" $S.NeonBlue)
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -h"""
 }
 
 function Print-Result([string]$Name, [object]$Value, [string]$Level = "OK") {
@@ -961,12 +994,18 @@ function Invoke-InternalVerify {
     Write-Host (Paint "Skipped by default. Use -v and run benchmark manually if needed." $S.Yellow)
 }
 
+if ($Manual) {
+    Show-Banner
+    Show-Manual
+    exit 0
+}
+
 Assert-Admin
 $dnsServersText = ""
 if ($DnsServers -and $DnsServers.Count -gt 0) {
     $dnsServersText = (($DnsServers | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }) -join ",")
 }
-Write-Detail ("Selected mode: " + $script:RunProfile + ", Dns=" + $Dns + ", DnsServers=" + $dnsServersText + ", KeepWSL=" + $KeepWSL + ", SkipVerify=" + $SkipVerify + ", VerifyOnly=" + $VerifyOnly)
+Write-Detail ("Selected mode: " + $script:RunProfile + ", Dns=" + $Dns + ", DnsServers=" + $dnsServersText + ", KeepWSL=" + $KeepWSL + ", SkipVerify=" + $SkipVerify + ", VerifyOnly=" + $VerifyOnly + ", NoRestore=" + $NoRestore)
 
 if ($VerifyOnly) {
     Step "Verify only"
@@ -980,7 +1019,11 @@ New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 
 if ($script:RunProfile -eq "Extreme") {
     Step "Create system restore point (Extreme safety)"
-    Ensure-ExtremeRestorePoint
+    if ($NoRestore) {
+        Print-Result "RestorePointCreated" "Skipped by -NoRestore" "WARN"
+    } else {
+        Ensure-ExtremeRestorePoint
+    }
 }
 
 Step "Backup registry snapshots"
