@@ -88,14 +88,14 @@ function Step([string]$Message) {
 function Show-Banner {
     Write-Host ""
     $art = @'
-                     /$$       /$$
-                   | $$      |__/
- /$$   /$$  /$$$$$$$| $$$$$$$  /$$  /$$$$$$
-| $$  | $$ /$$_____/| $$__  $$| $$ /$$__  $$
-| $$  | $$|  $$$$$$ | $$  \ $$| $$| $$$$$$$$
-| $$  | $$ \____  $$| $$  | $$| $$| $$_____/
-|  $$$$$$/ /$$$$$$$/| $$  | $$| $$|  $$$$$$$
- \______/ |_______/ |__/  |__/|__/ \_______/
+                                       /$$       /$$
+                                      | $$      |__/
+                   /$$   /$$  /$$$$$$$| $$$$$$$  /$$  /$$$$$$
+                  | $$  | $$ /$$_____/| $$__  $$| $$ /$$__  $$
+                  | $$  | $$|  $$$$$$ | $$  \ $$| $$| $$$$$$$$
+                  | $$  | $$ \____  $$| $$  | $$| $$| $$_____/
+                  |  $$$$$$/ /$$$$$$$/| $$  | $$| $$|  $$$$$$$
+                   \______/ |_______/ |__/  |__/|__/ \_______/
 '@
     $lines = $art -split "`r?`n"
     foreach ($line in $lines) {
@@ -105,11 +105,11 @@ function Show-Banner {
             Write-Host (Paint $line $S.NeonBlue)
         }
     }
-    Write-Host (Paint "                                   USHIE ONE-SHOT LATENCY OPTIMIZER" $S.NeonPink)
+    Write-Host (Paint "                 USHIE ONE-SHOT LATENCY OPTIMIZER" $S.NeonPink)
     $runMode = if ($Manual) { "MANUAL / HELP" } elseif ($VerifyOnly) { "VERIFY-ONLY (READ-ONLY)" } else { "APPLY ALL-IN-ONE" }
-    Write-Host (Paint "                                   NO PERSISTENT BACKGROUND SERVICES" $S.NeonPink)
-    Write-Host (Paint ("                                   MODE: " + $script:RunProfile + "   VERBOSE: " + $(if ($VerboseOutput) { "ON" } else { "OFF" })) $S.Slate)
-    Write-Host (Paint ("                                   RUN MODE: " + $runMode) $S.Slate)
+    Write-Host (Paint "                 NO PERSISTENT BACKGROUND SERVICES" $S.NeonPink)
+    Write-Host (Paint ("                 MODE: " + $script:RunProfile + "   VERBOSE: " + $(if ($VerboseOutput) { "ON" } else { "OFF" })) $S.Slate)
+    Write-Host (Paint ("                 RUN MODE: " + $runMode) $S.Slate)
     if ($NoRestore -and $script:RunProfile -eq "Extreme") {
         Write-Host (Paint "                                   EXTREME RESTOREPOINT: SKIP (-NoRestore)" $S.Yellow)
     }
