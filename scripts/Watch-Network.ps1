@@ -5,7 +5,8 @@
     [int]$SpikeMs    = 50,
     [switch]$KeepRawLog,
     [switch]$DeepCapture,
-    [int]$DeepCaptureMaxMB = 512
+    [int]$DeepCaptureMaxMB = 512,
+    [switch]$KeepOutput
 )
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -18,6 +19,16 @@ if (-not $isAdmin) {
 
 if ($DeepCaptureMaxMB -lt 64) { $DeepCaptureMaxMB = 64 }
 if ($DeepCaptureMaxMB -gt 4096) { $DeepCaptureMaxMB = 4096 }
+
+$script:OutputRoot = Join-Path $env:TEMP "ushie"
+$script:SessionDir = Join-Path $script:OutputRoot ("run_{0}" -f (Get-Date).ToString("yyyyMMdd_HHmmss"))
+try {
+    New-Item -ItemType Directory -Path $script:OutputRoot -Force | Out-Null
+    Get-ChildItem -Path $script:OutputRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like 'run_*' -and $_.LastWriteTime -lt (Get-Date).AddHours(-6) } |
+        ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $script:SessionDir -Force | Out-Null
+} catch {}
 
 $r1 = [System.Collections.Generic.List[PSCustomObject]]::new()
 $r2 = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -160,13 +171,10 @@ function Start-DeepCapture {
     if (-not $script:DeepCaptureEnabled) { return }
 
     try {
-        $desktopPath = [Environment]::GetFolderPath("Desktop")
-        if ([string]::IsNullOrWhiteSpace($desktopPath)) {
-            $desktopPath = Join-Path $env:USERPROFILE "Desktop"
+        $script:DeepCaptureDir = Join-Path $script:SessionDir "deepcap"
+        if (Test-Path $script:DeepCaptureDir) {
+            Remove-Item $script:DeepCaptureDir -Recurse -Force -ErrorAction SilentlyContinue
         }
-
-        $stamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-        $script:DeepCaptureDir = Join-Path $desktopPath ("ushie_deepcap_{0}" -f $stamp)
         New-Item -ItemType Directory -Path $script:DeepCaptureDir -Force | Out-Null
 
         $script:DeepCaptureEtlPath = Join-Path $script:DeepCaptureDir "network_trace.etl"
@@ -193,6 +201,8 @@ function Start-DeepCapture {
 function Stop-DeepCapture {
     if (-not $script:DeepCaptureEnabled) { return }
     if (-not $script:DeepCaptureActive) { return }
+
+    $cabPath = if ($script:DeepCaptureEtlPath) { [System.IO.Path]::ChangeExtension($script:DeepCaptureEtlPath, ".cab") } else { $null }
 
     try {
         netsh trace stop | Out-Null
@@ -244,6 +254,10 @@ function Stop-DeepCapture {
             $script:DeepCaptureError = "PCAP export tool not found or conversion failed."
         }
         Add-TimelineEvent "DeepCapture" "stopped (etl only)"
+    }
+
+    if ($cabPath -and (Test-Path $cabPath)) {
+        try { Remove-Item $cabPath -Force -ErrorAction SilentlyContinue } catch {}
     }
 }
 
@@ -837,6 +851,7 @@ if ($script:DeepCaptureEnabled) {
 } else {
     Write-Host "  DeepCap  : OFF (add -DeepCapture for forensic packet capture)" -ForegroundColor Gray
 }
+Write-Host "  Output   : TEMP (auto-clean after run; use -KeepOutput to retain)" -ForegroundColor Gray
 Write-Host "  Started  : $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
 Write-Host "  Ctrl+C to stop and generate report." -ForegroundColor Gray
 Write-Host ""
@@ -994,6 +1009,7 @@ finally {
     Write-Host ("  Relay        : {0}" -f $relayLabel) -ForegroundColor White
     Write-Host ("  Relay Region : {0}" -f $script:dotaRegion) -ForegroundColor White
     Write-Host ("  Spike Rule   : >= {0}ms (base {1}ms)" -f $finalSpikeMs, $SpikeMs) -ForegroundColor White
+    Write-Host ("  Output Mode  : {0}" -f $(if ($KeepOutput) { "keep temp files" } else { "auto-clean temp files" })) -ForegroundColor White
     if ($DeepCapture) {
         Write-Host ("  DeepCap      : {0}" -f $(if ($script:DeepCaptureEtlPath) { "ON" } else { "FAILED" })) -ForegroundColor White
         if ($script:DeepCaptureEtlPath) {
@@ -1048,10 +1064,12 @@ finally {
         Write-Host ""
     }
 
-    $historyPath = "$env:USERPROFILE\Desktop\ushie_net_history.csv"
-    Save-SessionHistory -Path $historyPath -StartTime $startTime -Duration $duration -RelayPop $script:dotaPop -RelayIP $script:dotaIP -RelayRegion $script:dotaRegion -DotaStats $sD -ThresholdMs $finalSpikeMs -GradeObj $grade
+    $historyPath = Join-Path $script:OutputRoot "ushie_net_history.csv"
+    if ($KeepOutput) {
+        Save-SessionHistory -Path $historyPath -StartTime $startTime -Duration $duration -RelayPop $script:dotaPop -RelayIP $script:dotaIP -RelayRegion $script:dotaRegion -DotaStats $sD -ThresholdMs $finalSpikeMs -GradeObj $grade
+    }
 
-    $logPath = "$env:USERPROFILE\Desktop\netlog_$($startTime.ToString('yyyyMMdd_HHmmss')).txt"
+    $logPath = Join-Path $script:SessionDir "netlog.txt"
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("USHIE NETWORK MONITOR - LOG")
     $lines.Add("============================")
@@ -1114,13 +1132,22 @@ finally {
     }
 
     $lines | Set-Content -Path $logPath -Encoding UTF8
-    Write-Host "  Log saved: $logPath" -ForegroundColor Cyan
-    Write-Host "  History saved: $historyPath" -ForegroundColor Cyan
-    if ($DeepCapture -and $script:DeepCaptureEtlPath) {
-        Write-Host "  DeepCap ETL saved: $($script:DeepCaptureEtlPath)" -ForegroundColor Cyan
-        if ($script:DeepCapturePcapPath) {
-            Write-Host "  DeepCap PCAP saved: $($script:DeepCapturePcapPath)" -ForegroundColor Cyan
+
+    if ($KeepOutput) {
+        Write-Host "  Log saved: $logPath" -ForegroundColor Cyan
+        Write-Host "  History saved: $historyPath" -ForegroundColor Cyan
+        if ($DeepCapture -and $script:DeepCaptureEtlPath) {
+            Write-Host "  DeepCap ETL saved: $($script:DeepCaptureEtlPath)" -ForegroundColor Cyan
+            if ($script:DeepCapturePcapPath) {
+                Write-Host "  DeepCap PCAP saved: $($script:DeepCapturePcapPath)" -ForegroundColor Cyan
+            }
         }
+        Write-Host "  Output folder: $($script:SessionDir)" -ForegroundColor Cyan
+    } else {
+        try {
+            Remove-Item $script:SessionDir -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {}
+        Write-Host "  Temp output cleaned (use -KeepOutput to retain logs/capture files)." -ForegroundColor DarkGray
     }
     Write-Host ""
 }
