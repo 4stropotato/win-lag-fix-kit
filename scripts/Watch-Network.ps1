@@ -7,7 +7,7 @@
     [switch]$DeepCapture,
     [int]$DeepCaptureMaxMB = 512,
     [switch]$KeepOutput,
-    [switch]$AutoFix
+    [switch]$NoAutoFix
 )
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -55,6 +55,7 @@ $script:DeepCaptureDir = $null
 $script:DeepCaptureEtlPath = $null
 $script:DeepCapturePcapPath = $null
 $script:DeepCaptureError = $null
+$script:AutoFixEnabled = -not $NoAutoFix
 $script:AutoFixActions = [System.Collections.Generic.List[string]]::new()
 $script:AutoFixStatus = "Disabled"
 $script:AutoFixReason = "-"
@@ -928,7 +929,7 @@ function Apply-AutoFixCommon {
 }
 
 function Invoke-NetworkAutoFix($Ref1Stats, $Ref2Stats, $DotaStats, [int]$ThresholdMs) {
-    if (-not $AutoFix) {
+    if (-not $script:AutoFixEnabled) {
         $script:AutoFixStatus = "Disabled"
         $script:AutoFixReason = "-"
         return
@@ -995,7 +996,7 @@ if ($script:DeepCaptureEnabled) {
 } else {
     Write-Host "  DeepCap  : OFF (add -DeepCapture for forensic packet capture)" -ForegroundColor Gray
 }
-Write-Host ("  AutoFix  : {0}" -f $(if ($AutoFix) { "ON (post-test automatic remediation)" } else { "OFF" })) -ForegroundColor Gray
+Write-Host ("  AutoFix  : {0}" -f $(if ($script:AutoFixEnabled) { "ON (post-test automatic remediation)" } else { "OFF (-NoAutoFix)" })) -ForegroundColor Gray
 Write-Host "  Output   : TEMP (auto-clean after run; use -KeepOutput to retain)" -ForegroundColor Gray
 Write-Host "  Started  : $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
 Write-Host "  Ctrl+C to stop and generate report." -ForegroundColor Gray

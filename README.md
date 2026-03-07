@@ -64,9 +64,9 @@ Wireshark-like deep capture mode (ETL + optional PCAP export):
 .\scripts\Watch-Network.ps1 -DeepCapture
 ```
 
-Test + auto-remediate (post-session):
+Test + auto-remediate (post-session, default behavior):
 ```powershell
-.\scripts\Watch-Network.ps1 -AutoFix
+.\scripts\Watch-Network.ps1
 ```
 
 Notes:
@@ -74,7 +74,8 @@ Notes:
 - If `etl2pcapng.exe` or `pktmon.exe` conversion succeeds, a `.pcapng` is also saved.
 - Default output is temporary (`%TEMP%\ushie\run_*`) and auto-cleaned after run.
 - Add `-KeepOutput` if you want to keep logs/history/capture files.
-- `-AutoFix` runs targeted network remediation after analysis (DNS auto-select + DNS flush + TCP sanity defaults).
+- AutoFix is enabled by default and runs targeted remediation after analysis (DNS auto-select + DNS flush + TCP sanity defaults).
+- Use `-NoAutoFix` if you want monitor-only mode.
 
 ## What It Changes
 - Removes `OverlayTestMode` from DWM.
