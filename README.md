@@ -76,6 +76,7 @@ Notes:
 - Add `-KeepOutput` if you want to keep logs/history/capture files.
 - AutoFix is enabled by default and runs targeted remediation after analysis (DNS auto-select + DNS flush + TCP sanity defaults).
 - Use `-NoAutoFix` if you want monitor-only mode.
+- Startup auto-cleans stale trace state (`netsh trace stop`, `pktmon stop/unload`) and old temp run folders (when not using `-KeepOutput`).
 
 ## What It Changes
 - Removes `OverlayTestMode` from DWM.

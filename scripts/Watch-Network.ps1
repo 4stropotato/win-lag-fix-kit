@@ -23,11 +23,18 @@ if ($DeepCaptureMaxMB -gt 4096) { $DeepCaptureMaxMB = 4096 }
 
 $script:OutputRoot = Join-Path $env:TEMP "ushie"
 $script:SessionDir = Join-Path $script:OutputRoot ("run_{0}" -f (Get-Date).ToString("yyyyMMdd_HHmmss"))
+try { netsh trace stop 2>$null | Out-Null } catch {}
+try { pktmon stop 2>$null | Out-Null } catch {}
+try { pktmon unload 2>$null | Out-Null } catch {}
 try {
     New-Item -ItemType Directory -Path $script:OutputRoot -Force | Out-Null
-    Get-ChildItem -Path $script:OutputRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like 'run_*' -and $_.LastWriteTime -lt (Get-Date).AddHours(-6) } |
-        ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    if (-not $KeepOutput) {
+        Remove-Item (Join-Path $script:OutputRoot "run_*") -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        Get-ChildItem -Path $script:OutputRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like 'run_*' -and $_.LastWriteTime -lt (Get-Date).AddHours(-6) } |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
     New-Item -ItemType Directory -Path $script:SessionDir -Force | Out-Null
 } catch {}
 
@@ -1133,6 +1140,8 @@ finally {
     Write-Host ""
 
     Stop-DeepCapture
+    try { pktmon stop 2>$null | Out-Null } catch {}
+    try { pktmon unload 2>$null | Out-Null } catch {}
 
     $endTime = Get-Date
     $duration = $endTime - $startTime
