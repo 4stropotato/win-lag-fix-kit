@@ -2,9 +2,9 @@
     [string]$Ref1    = "1.1.1.1",
     [string]$Ref2    = "8.8.8.8",
     [int]$IntervalMs = 1000,
-    [int]$SpikeMs    = 50
+    [int]$SpikeMs    = 50,
+    [switch]$KeepRawLog
 )
-
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Host ""
@@ -19,6 +19,7 @@ $r2 = [System.Collections.Generic.List[PSCustomObject]]::new()
 $rD = [System.Collections.Generic.List[PSCustomObject]]::new()
 $startTime = Get-Date
 $script:dotaIP = $null
+$script:dotaPop = $null
 $script:dotaLastDetect = [datetime]::MinValue
 $script:dotaMisses = 0
 $script:dotaConsoleLogPath = $null
@@ -127,18 +128,41 @@ function Get-DotaServerIPFromConsoleLog {
         $meta = Get-Item -Path $logPath -ErrorAction SilentlyContinue
         if ($null -eq $meta) { return $null }
 
-        $lines = Get-Content -Path $logPath -Tail 2000 -ErrorAction SilentlyContinue
+        $lines = Get-Content -Path $logPath -Tail 12000 -ErrorAction SilentlyContinue
         if (-not $lines) { return $null }
+
+        # If latest UI state is dashboard, do not keep stale relay from previous matches.
+        for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+            $line = $lines[$i]
+            if ($line -match 'ChangeGameUIState:\s+\S+\s+->\s+(\S+)') {
+                $uiDest = $matches[1]
+                if ($uiDest -eq 'DOTA_GAME_UI_STATE_DASHBOARD') { return $null }
+                break
+            }
+        }
 
         for ($i = $lines.Count - 1; $i -ge 0; $i--) {
             $line = $lines[$i]
-            if ($line -match 'SteamNetSockets.*Selecting\s+\S+\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)\s+as\s+primary') {
-                $ip = $matches[1]
-                if ($ip -notmatch $script:PrivateIPv4Pattern) { return $ip }
+            if ($line -match 'SteamNetSockets.*(?:Selecting|Switched primary to)\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)') {
+                $pop = $matches[1]
+                $ip = $matches[2]
+                if ($ip -notmatch $script:PrivateIPv4Pattern) {
+                    return [PSCustomObject]@{ IP = $ip; Pop = $pop; Source = "ConsoleLog" }
+                }
             }
-            if ($line -match 'SteamNetSockets.*Requesting\s+session\s+from\s+\S+\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\).*Rank=1') {
-                $ip = $matches[1]
-                if ($ip -notmatch $script:PrivateIPv4Pattern) { return $ip }
+            if ($line -match 'SteamNetSockets.*Requesting\s+session\s+from\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\).*Rank=1') {
+                $pop = $matches[1]
+                $ip = $matches[2]
+                if ($ip -notmatch $script:PrivateIPv4Pattern) {
+                    return [PSCustomObject]@{ IP = $ip; Pop = $pop; Source = "ConsoleLog" }
+                }
+            }
+            if ($line -match '\[Networking\]\s+Primary router:\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)') {
+                $pop = $matches[1]
+                $ip = $matches[2]
+                if ($ip -notmatch $script:PrivateIPv4Pattern) {
+                    return [PSCustomObject]@{ IP = $ip; Pop = $pop; Source = "ConsoleLog" }
+                }
             }
         }
     } catch {}
@@ -278,16 +302,24 @@ function Get-DotaServerIP {
 
     # Most reliable for Source 2 SDR: parse latest relay from Dota console.log.
     $fromLog = Get-DotaServerIPFromConsoleLog
-    if ($null -ne $fromLog) { return $fromLog }
+    if ($null -ne $fromLog) {
+        $script:dotaPop = $fromLog.Pop
+        return $fromLog.IP
+    }
 
     if ($localPorts.Count -eq 0) { return $null }
 
     # Fast path: connected UDP endpoints visible in netstat.
     $remote = Get-DotaServerIPFromNetstat -LocalPorts $localPorts
-    if ($null -ne $remote) { return $remote }
+    if ($null -ne $remote) {
+        $script:dotaPop = $null
+        return $remote
+    }
 
     # Fallback: raw sniff on active interfaces.
-    return (Get-DotaServerIPFromRawSniff -LocalPorts $localPorts)
+    $raw = Get-DotaServerIPFromRawSniff -LocalPorts $localPorts
+    if ($null -ne $raw) { $script:dotaPop = $null }
+    return $raw
 }
 
 function Write-PinnedLine([string]$text, [string]$color) {
@@ -390,12 +422,24 @@ try {
 
         if ($script:dotaIP -and $script:dotaIP -notmatch '^\d+\.\d+\.\d+\.\d+$') {
             $script:dotaIP = $null
+            $script:dotaPop = $null
         }
 
         # Refresh detection every 10s so it can follow relay changes between matches.
         if (((Get-Date) - $script:dotaLastDetect).TotalSeconds -ge 10 -or $null -eq $script:dotaIP) {
             $detected = Get-DotaServerIP
-            if ($null -ne $detected) { $script:dotaIP = $detected }
+            if ($null -ne $detected) {
+                $script:dotaIP = $detected
+                $script:dotaMisses = 0
+            } else {
+                $script:dotaMisses++
+                # Two consecutive misses ~= 20s => clear stale relay after game ends.
+                if ($script:dotaMisses -ge 2) {
+                    $script:dotaIP = $null
+                    $script:dotaPop = $null
+                    $script:dotaMisses = 0
+                }
+            }
             $script:dotaLastDetect = Get-Date
         }
 
@@ -403,16 +447,6 @@ try {
         if ($null -ne $script:dotaIP) {
             $msD = Ping-Once $script:dotaIP
             $rD.Add([PSCustomObject]@{ Time = $ts; Ms = $msD })
-
-            if ($null -eq $msD) {
-                $script:dotaMisses++
-                if ($script:dotaMisses -ge 5) {
-                    $script:dotaIP = $null
-                    $script:dotaMisses = 0
-                }
-            } else {
-                $script:dotaMisses = 0
-            }
         }
 
         if ($script:UsePinnedConsole -and $pingRow -ge 0) {
@@ -423,7 +457,8 @@ try {
                 if ($null -eq $script:dotaIP) {
                     Write-PinnedLine "  [$ts] Dota server           -- detecting... queue a match" "Gray"
                 } else {
-                    Write-PingPinned $ts "ValveRelay:$($script:dotaIP)" $msD $SpikeMs
+                    $relayLabel = if ($script:dotaPop) { "ValveRelay:$($script:dotaPop) $($script:dotaIP)" } else { "ValveRelay:$($script:dotaIP)" }
+                    Write-PingPinned $ts $relayLabel $msD $SpikeMs
                 }
             } catch {
                 $script:UsePinnedConsole = $false
@@ -436,7 +471,8 @@ try {
             if ($null -eq $script:dotaIP) {
                 Write-PinnedLine "  [$ts] Dota server           -- detecting... queue a match" "Gray"
             } else {
-                Write-PingPinned $ts "ValveRelay:$($script:dotaIP)" $msD $SpikeMs
+                $relayLabel = if ($script:dotaPop) { "ValveRelay:$($script:dotaPop) $($script:dotaIP)" } else { "ValveRelay:$($script:dotaIP)" }
+                Write-PingPinned $ts $relayLabel $msD $SpikeMs
             }
         }
 
@@ -460,7 +496,7 @@ finally {
     foreach ($t in @(
         @{ Label = $Ref1; S = $s1 },
         @{ Label = $Ref2; S = $s2 },
-        @{ Label = "Dota:$($script:dotaIP)"; S = $sD }
+        @{ Label = "$(if ($script:dotaPop) { "Dota:$($script:dotaPop) $($script:dotaIP)" } else { "Dota:$($script:dotaIP)" })"; S = $sD }
     )) {
         if ($null -eq $t.S) { continue }
         $s = $t.S
@@ -481,7 +517,7 @@ finally {
     $lines.Add("Duration : $($duration.ToString('hh\:mm\:ss'))")
     $lines.Add("Ref1     : $Ref1")
     $lines.Add("Ref2     : $Ref2")
-    $lines.Add("Dota     : $(if ($script:dotaIP) { $script:dotaIP } else { 'not detected' })")
+    $lines.Add("Dota     : $(if ($script:dotaIP) { if ($script:dotaPop) { "$($script:dotaPop) $($script:dotaIP)" } else { $script:dotaIP } } else { 'not detected' })")
     $lines.Add("Spike threshold: ${SpikeMs}ms")
     $lines.Add("")
     $lines.Add("--- SUMMARY ---")
@@ -489,7 +525,7 @@ finally {
     foreach ($t in @(
         @{ Label = $Ref1; S = $s1 },
         @{ Label = $Ref2; S = $s2 },
-        @{ Label = "Dota:$($script:dotaIP)"; S = $sD }
+        @{ Label = "$(if ($script:dotaPop) { "Dota:$($script:dotaPop) $($script:dotaIP)" } else { "Dota:$($script:dotaIP)" })"; S = $sD }
     )) {
         if ($null -eq $t.S) { continue }
         $s = $t.S
@@ -501,16 +537,21 @@ finally {
         $lines.Add("")
     }
 
-    $lines.Add("--- RAW PINGS $Ref1 ---")
-    $lines.Add(($r1 | Format-Table -AutoSize | Out-String))
-    $lines.Add("--- RAW PINGS $Ref2 ---")
-    $lines.Add(($r2 | Format-Table -AutoSize | Out-String))
-    if ($rD.Count -gt 0) {
-        $lines.Add("--- RAW PINGS Dota:$($script:dotaIP) ---")
-        $lines.Add(($rD | Format-Table -AutoSize | Out-String))
+    if ($KeepRawLog) {
+        $lines.Add("--- RAW PINGS $Ref1 ---")
+        $lines.Add(($r1 | Format-Table -AutoSize | Out-String))
+        $lines.Add("--- RAW PINGS $Ref2 ---")
+        $lines.Add(($r2 | Format-Table -AutoSize | Out-String))
+        if ($rD.Count -gt 0) {
+            $lines.Add("--- RAW PINGS Dota:$($script:dotaIP) ---")
+            $lines.Add(($rD | Format-Table -AutoSize | Out-String))
+        }
+    } else {
+        $lines.Add("Raw ping list omitted (use -KeepRawLog to include).")
     }
 
     $lines | Set-Content -Path $logPath -Encoding UTF8
     Write-Host "  Log saved: $logPath" -ForegroundColor Cyan
     Write-Host ""
 }
+
