@@ -143,7 +143,14 @@ function Get-DotaServerIPFromConsoleLog {
 
         for ($i = $lines.Count - 1; $i -ge 0; $i--) {
             $line = $lines[$i]
-            if ($line -match 'SteamNetSockets.*(?:Selecting|Switched primary to)\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)') {
+            if ($line -match 'SteamNetSockets.*Switched primary to\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)') {
+                $pop = $matches[1]
+                $ip = $matches[2]
+                if ($ip -notmatch $script:PrivateIPv4Pattern) {
+                    return [PSCustomObject]@{ IP = $ip; Pop = $pop; Source = "ConsoleLog" }
+                }
+            }
+            if ($line -match 'SteamNetSockets.*Selecting\s+(\S+)\s+\((\d{1,3}(?:\.\d{1,3}){3}):\d+\)\s+as\s+primary') {
                 $pop = $matches[1]
                 $ip = $matches[2]
                 if ($ip -notmatch $script:PrivateIPv4Pattern) {
