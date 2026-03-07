@@ -1225,16 +1225,4 @@ if (-not $SkipVerify) {
 Write-Host ""
 Write-Host (Paint "   >>> USHIE PASS COMPLETE. NO PERSISTENT BACKGROUND TASK CREATED <<<" $S.Green)
 Write-Host ((Paint "   >>> BACKUP PATH: " $S.Cyan) + $backupDir)
-$restartCmdPath = Join-Path $backupDir "Restart-Now.cmd"
-$restartPs1Path = Join-Path $backupDir "Restart-Now.ps1"
-@(
-    "@echo off",
-    "shutdown /r /t 0"
-) | Set-Content -Path $restartCmdPath -Encoding ASCII
-@(
-    "Start-Process shutdown.exe -ArgumentList '/r /t 0' -Verb RunAs"
-) | Set-Content -Path $restartPs1Path -Encoding ASCII
-Write-Host (Paint "   >>> RESTART READY. CLICK PATH BELOW (NON-POWERUSER FRIENDLY): <<<" $S.Yellow)
-Write-Host ((Paint "   >>> CMD: " $S.Cyan) + $restartCmdPath)
-Write-Host ((Paint "   >>> PS1: " $S.Cyan) + $restartPs1Path)
-Write-Host (Paint "   >>> OR RUN NOW: shutdown /r /t 0 <<<" $S.Yellow)
+Write-Host (Paint "   >>> RESTART NOW TO LOCK IN FULL GAMING BOOST <<<" $S.Yellow)
