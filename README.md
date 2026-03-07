@@ -114,5 +114,6 @@ Notes:
 ## Notes
 - This is one-shot only (no persistent background task is created).
 - Some changes require reboot.
+- Script prints clickable restart helper files (`Restart-Now.cmd` / `Restart-Now.ps1`) in the backup folder after completion.
 - `Extreme` can reduce indexing/background features to prioritize responsiveness.
 - If lag remains even after this and clean driver install, use a clean official non-debloated Windows image.
