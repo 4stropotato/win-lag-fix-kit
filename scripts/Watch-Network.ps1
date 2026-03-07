@@ -6,7 +6,8 @@
     [switch]$KeepRawLog,
     [switch]$DeepCapture,
     [int]$DeepCaptureMaxMB = 512,
-    [switch]$KeepOutput
+    [switch]$KeepOutput,
+    [switch]$AutoFix
 )
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -54,6 +55,9 @@ $script:DeepCaptureDir = $null
 $script:DeepCaptureEtlPath = $null
 $script:DeepCapturePcapPath = $null
 $script:DeepCaptureError = $null
+$script:AutoFixActions = [System.Collections.Generic.List[string]]::new()
+$script:AutoFixStatus = "Disabled"
+$script:AutoFixReason = "-"
 
 # Enable ANSI/VT escape processing so cursor positioning works in modern consoles.
 try {
@@ -834,6 +838,146 @@ function Save-SessionHistory(
     } catch {}
 }
 
+function Add-AutoFixAction([string]$Message) {
+    if ([string]::IsNullOrWhiteSpace($Message)) { return }
+    $script:AutoFixActions.Add($Message)
+}
+
+function Get-AutoFixDnsWinner {
+    $ifc = Get-NetIPConfiguration -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter -and $_.NetAdapter.Status -eq 'Up' } |
+        Select-Object -First 1
+    if ($null -eq $ifc) { return $null }
+
+    $current = @()
+    try {
+        $current = @(Get-DnsClientServerAddress -InterfaceIndex $ifc.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
+        $current = @($current | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' })
+    } catch {}
+
+    $candidates = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ($current.Count -gt 0) {
+        $candidates.Add([PSCustomObject]@{ Name = "CurrentAdapterDNS"; Servers = @($current) })
+    }
+    $candidates.Add([PSCustomObject]@{ Name = "Cloudflare"; Servers = @("1.1.1.1","1.0.0.1") })
+    $candidates.Add([PSCustomObject]@{ Name = "Google"; Servers = @("8.8.8.8","8.8.4.4") })
+    $candidates.Add([PSCustomObject]@{ Name = "Quad9"; Servers = @("9.9.9.9","149.112.112.112") })
+    $candidates.Add([PSCustomObject]@{ Name = "OpenDNS"; Servers = @("208.67.222.222","208.67.220.220") })
+    $candidates.Add([PSCustomObject]@{ Name = "AdGuard"; Servers = @("94.140.14.14","94.140.15.15") })
+
+    $best = $null
+    foreach ($cand in $candidates) {
+        $primary = $cand.Servers[0]
+        $samples = [System.Collections.Generic.List[double]]::new()
+        for ($i = 0; $i -lt 2; $i++) {
+            $ms = Ping-Once -Address $primary -TimeoutMs 1000
+            if ($null -ne $ms) {
+                $samples.Add([double]$ms)
+            } else {
+                $samples.Add(2500.0)
+            }
+        }
+
+        $score = [Math]::Round((($samples | Measure-Object -Average).Average), 2)
+        if ($null -eq $best -or $score -lt $best.Score) {
+            $best = [PSCustomObject]@{
+                Name = $cand.Name
+                Score = $score
+                Servers = $cand.Servers
+                InterfaceIndex = $ifc.InterfaceIndex
+                InterfaceAlias = $ifc.InterfaceAlias
+                Current = @($current)
+            }
+        }
+    }
+    return $best
+}
+
+function Apply-AutoFixDns {
+    try {
+        $winner = Get-AutoFixDnsWinner
+        if ($null -eq $winner) {
+            Add-AutoFixAction "DNS auto-select skipped (no active gateway adapter)."
+            return
+        }
+
+        $currentCsv = ($winner.Current -join ",")
+        $targetCsv = ($winner.Servers -join ",")
+        $changed = ($currentCsv -ne $targetCsv)
+
+        if ($changed) {
+            Set-DnsClientServerAddress -InterfaceIndex $winner.InterfaceIndex -ServerAddresses $winner.Servers -ErrorAction Stop
+            Add-AutoFixAction ("DNS set to {0} on {1} ({2}ms)" -f $winner.Name, $winner.InterfaceAlias, $winner.Score)
+        } else {
+            Add-AutoFixAction ("DNS already best ({0}) on {1} ({2}ms)" -f $winner.Name, $winner.InterfaceAlias, $winner.Score)
+        }
+    } catch {
+        Add-AutoFixAction ("DNS auto-select failed: {0}" -f $_.Exception.Message)
+    }
+}
+
+function Apply-AutoFixCommon {
+    try { Clear-DnsClientCache -ErrorAction SilentlyContinue } catch {}
+    try { ipconfig /flushdns | Out-Null } catch {}
+    Add-AutoFixAction "Flushed DNS cache."
+
+    try { netsh int tcp set global rss=enabled | Out-Null } catch {}
+    try { netsh int tcp set global autotuninglevel=normal | Out-Null } catch {}
+    try { netsh int tcp set global ecncapability=disabled | Out-Null } catch {}
+    Add-AutoFixAction "Applied TCP sanity defaults (RSS on, AutoTune normal, ECN off)."
+}
+
+function Invoke-NetworkAutoFix($Ref1Stats, $Ref2Stats, $DotaStats, [int]$ThresholdMs) {
+    if (-not $AutoFix) {
+        $script:AutoFixStatus = "Disabled"
+        $script:AutoFixReason = "-"
+        return
+    }
+
+    $script:AutoFixStatus = "Skipped"
+    $script:AutoFixReason = "No action needed"
+    Add-TimelineEvent "AutoFix" "evaluate"
+
+    if ($null -eq $DotaStats -or $DotaStats.Total -lt 30) {
+        $script:AutoFixReason = "Not enough Dota samples (<30)"
+        Add-AutoFixAction "AutoFix skipped: gather more samples first."
+        Add-TimelineEvent "AutoFix" "skip-not-enough-samples"
+        return
+    }
+
+    $ref1Bad = ($null -eq $Ref1Stats -or $Ref1Stats.LossPct -gt 1.0 -or $Ref1Stats.JitterMs -gt 3.0 -or $Ref1Stats.P99Ms -gt 45)
+    $ref2Bad = ($null -eq $Ref2Stats -or $Ref2Stats.LossPct -gt 1.0 -or $Ref2Stats.JitterMs -gt 3.0 -or $Ref2Stats.P99Ms -gt 45)
+    $refsBad = ($ref1Bad -or $ref2Bad)
+
+    $dotaBad = (
+        $DotaStats.LossPct -gt 0.5 -or
+        $DotaStats.JitterMs -gt 2.0 -or
+        $DotaStats.P99Ms -gt ($ThresholdMs + 15) -or
+        $DotaStats.Spikes -gt [Math]::Max(3, [int]($DotaStats.Total * 0.02))
+    )
+
+    if (-not $dotaBad -and -not $refsBad) {
+        $script:AutoFixReason = "Session already stable"
+        Add-AutoFixAction "AutoFix skipped: metrics already stable."
+        Add-TimelineEvent "AutoFix" "skip-stable"
+        return
+    }
+
+    if ($dotaBad -and -not $refsBad) {
+        $script:AutoFixReason = "Detected game-path/route issue"
+    } elseif ($refsBad) {
+        $script:AutoFixReason = "Detected local/ISP path issue"
+    } else {
+        $script:AutoFixReason = "Detected mixed latency issue"
+    }
+
+    Apply-AutoFixCommon
+    Apply-AutoFixDns
+
+    $script:AutoFixStatus = "Applied"
+    Add-TimelineEvent "AutoFix" "applied"
+}
+
 $script:UsePinnedConsole = $true
 $w = 80
 $pingRow = -1
@@ -851,6 +995,7 @@ if ($script:DeepCaptureEnabled) {
 } else {
     Write-Host "  DeepCap  : OFF (add -DeepCapture for forensic packet capture)" -ForegroundColor Gray
 }
+Write-Host ("  AutoFix  : {0}" -f $(if ($AutoFix) { "ON (post-test automatic remediation)" } else { "OFF" })) -ForegroundColor Gray
 Write-Host "  Output   : TEMP (auto-clean after run; use -KeepOutput to retain)" -ForegroundColor Gray
 Write-Host "  Started  : $($startTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
 Write-Host "  Ctrl+C to stop and generate report." -ForegroundColor Gray
@@ -996,6 +1141,7 @@ finally {
     $s2 = Get-Stats $r2 $finalSpikeMs
     $sD = if ($rD.Count -gt 0) { Get-Stats $rD $finalSpikeMs } else { $null }
     $grade = Get-SessionGrade -DotaStats $sD -ThresholdMs $finalSpikeMs
+    Invoke-NetworkAutoFix -Ref1Stats $s1 -Ref2Stats $s2 -DotaStats $sD -ThresholdMs $finalSpikeMs
 
     $relayLabel = if ($script:dotaIP) {
         if ($script:dotaPop) { "$($script:dotaPop) $($script:dotaIP)" } else { $script:dotaIP }
@@ -1009,6 +1155,7 @@ finally {
     Write-Host ("  Relay        : {0}" -f $relayLabel) -ForegroundColor White
     Write-Host ("  Relay Region : {0}" -f $script:dotaRegion) -ForegroundColor White
     Write-Host ("  Spike Rule   : >= {0}ms (base {1}ms)" -f $finalSpikeMs, $SpikeMs) -ForegroundColor White
+    Write-Host ("  AutoFix      : {0} ({1})" -f $script:AutoFixStatus, $script:AutoFixReason) -ForegroundColor White
     Write-Host ("  Output Mode  : {0}" -f $(if ($KeepOutput) { "keep temp files" } else { "auto-clean temp files" })) -ForegroundColor White
     if ($DeepCapture) {
         Write-Host ("  DeepCap      : {0}" -f $(if ($script:DeepCaptureEtlPath) { "ON" } else { "FAILED" })) -ForegroundColor White
@@ -1056,6 +1203,14 @@ finally {
     Write-Host ("  Session Grade: {0} ({1}/100)  {2}" -f $grade.Grade, $grade.Score, $grade.Reason) -ForegroundColor $gradeColor
     Write-Host ""
 
+    if ($script:AutoFixActions.Count -gt 0) {
+        Write-Host "  AutoFix Actions:" -ForegroundColor Cyan
+        foreach ($a in $script:AutoFixActions) {
+            Write-Host ("    - {0}" -f $a) -ForegroundColor Gray
+        }
+        Write-Host ""
+    }
+
     if ($script:eventTimeline.Count -gt 0) {
         Write-Host "  Recent Events:" -ForegroundColor Cyan
         foreach ($ev in ($script:eventTimeline | Select-Object -Last 8)) {
@@ -1081,6 +1236,7 @@ finally {
     $lines.Add("State    : $($script:dotaState)")
     $lines.Add("Dota     : $relayLabel")
     $lines.Add("Region   : $($script:dotaRegion)")
+    $lines.Add("AutoFix  : $($script:AutoFixStatus) ($($script:AutoFixReason))")
     if ($DeepCapture) {
         $lines.Add("DeepCap  : $(if ($script:DeepCaptureEtlPath) { 'ON' } else { 'FAILED' })")
         if ($script:DeepCaptureEtlPath) { $lines.Add("DeepCapETL  : $($script:DeepCaptureEtlPath)") }
@@ -1093,6 +1249,13 @@ finally {
     $lines.Add("Spike threshold (final): ${finalSpikeMs}ms (base ${SpikeMs}ms)")
     $lines.Add("Session Grade: $($grade.Grade) ($($grade.Score)/100) $($grade.Reason)")
     $lines.Add("")
+    if ($script:AutoFixActions.Count -gt 0) {
+        $lines.Add("--- AUTOFIX ACTIONS ---")
+        foreach ($a in $script:AutoFixActions) {
+            $lines.Add("- $a")
+        }
+        $lines.Add("")
+    }
     $lines.Add("--- SUMMARY ---")
 
     foreach ($t in @(
