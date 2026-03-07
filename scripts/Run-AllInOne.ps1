@@ -992,7 +992,8 @@ function Invoke-InternalVerify {
     Verify-Section "Core Services"
     $coreServiceNames = @(
         "BITS","wuauserv","UsoSvc","WaaSMedicSvc","TrustedInstaller","Dnscache","DPS","EventLog",
-        "SysMain","WSearch","DiagTrack","dmwappushservice","DoSvc","WerSvc"
+        "SysMain","WSearch","DiagTrack","dmwappushservice","DoSvc","WerSvc",
+        "TermService","NlaSvc","netprofm","Tailscale","sshd"
     )
     $coreServices = Get-ServiceStateRows -Names $coreServiceNames
     if ($VerboseOutput) {
@@ -1189,6 +1190,24 @@ sc.exe config XblAuthManager start= demand | Out-Null
 sc.exe config XblGameSave start= demand | Out-Null
 sc.exe config XboxNetApiSvc start= demand | Out-Null
 sc.exe config XboxGipSvc start= demand | Out-Null
+
+Step "Restore remote access stack (Tailscale/RDP/SSH)"
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f | Out-Null
+netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes | Out-Null
+sc.exe config TermService start= auto | Out-Null
+sc.exe config NlaSvc start= auto | Out-Null
+sc.exe config netprofm start= auto | Out-Null
+Start-Service NlaSvc -ErrorAction SilentlyContinue
+Start-Service netprofm -ErrorAction SilentlyContinue
+Start-Service TermService -ErrorAction SilentlyContinue
+if (Get-Service -Name Tailscale -ErrorAction SilentlyContinue) {
+    sc.exe config Tailscale start= auto | Out-Null
+    Start-Service Tailscale -ErrorAction SilentlyContinue
+}
+if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
+    sc.exe config sshd start= auto | Out-Null
+    Start-Service sshd -ErrorAction SilentlyContinue
+}
 
 Step "Enable HPET"
 pnputil /enable-device "ACPI\PNP0103\0" | Out-Null

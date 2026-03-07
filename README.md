@@ -93,6 +93,10 @@ Notes:
 - Disables hypervisor launch + VBS flags for low-latency gaming.
 - Disables WSL/VirtualMachinePlatform (optional skip switch).
 - Restores key servicing/update service startup modes.
+- Restores remote-access baseline for unattended access:
+  - enables RDP (`fDenyTSConnections=0`) and Remote Desktop firewall rules
+  - ensures `TermService`, `NlaSvc`, `netprofm` are started
+  - ensures `Tailscale` / `sshd` auto-start if installed
 - Applies key debloat/privacy toggles (Copilot/activity/background-app related).
 - Applies profile-based shell tuning:
   - `Safe`: restores default visual/shell responsiveness values
