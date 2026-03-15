@@ -182,6 +182,30 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     } catch {}
 }
 
+function Complete-SectionSpinner {
+    if (-not (Test-CanAnimate)) {
+        $script:ActiveSectionRow = -1
+        $script:ActiveSectionText = ""
+        $script:ActiveSectionColor = $null
+        return
+    }
+    if ($script:ActiveSectionRow -lt 0) { return }
+
+    $currentTop = [Console]::CursorTop
+    $currentLeft = [Console]::CursorLeft
+
+    try {
+        [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
+        [Console]::Write((Format-SectionSpinnerLine -Frame " " -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
+        [Console]::Out.Flush()
+        [Console]::SetCursorPosition($currentLeft, $currentTop)
+    } catch {}
+
+    $script:ActiveSectionRow = -1
+    $script:ActiveSectionText = ""
+    $script:ActiveSectionColor = $null
+}
+
 
 
 function Invoke-ProcessWithSpinner([string]$FilePath, [string[]]$ArgumentList, [string]$Label, [string]$AccentColor) {
@@ -210,6 +234,7 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
     $ruleWidth = [Math]::Min($width, [Math]::Max(($sectionText.Length + 8), 54))
     $rule = ("-" * $ruleWidth)
 
+    Complete-SectionSpinner
     Start-SectionSpinner -Text $sectionText -Color $AccentColor
     Write-Host (Paint $rule $S.Slate)
 }
@@ -1176,6 +1201,7 @@ function Invoke-InternalVerify {
 
     Verify-Section "Performance Snapshot"
     Write-Host (Paint "Skipped by default. Use -v and run benchmark manually if needed." $S.Yellow)
+    Complete-SectionSpinner
 }
 
 if ($Manual) {
@@ -1436,6 +1462,7 @@ if (-not $SkipVerify) {
     Invoke-InternalVerify
 }
 
+Complete-SectionSpinner
 Write-Host ""
 Write-Host (Paint "   >>> USHIE PASS COMPLETE. NO PERSISTENT BACKGROUND TASK CREATED <<<" $S.Green)
 Write-Host ((Paint "   >>> BACKUP PATH: " $S.Cyan) + $backupDir)
