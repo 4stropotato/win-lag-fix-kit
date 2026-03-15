@@ -45,6 +45,7 @@ $script:RunProfile = $Mode
 $script:DnsSelection = "<not set>"
 $script:StateRoot = "HKCU:\Software\ushie\WinLagFix"
 $script:ActiveSectionRow = -1
+$script:ActiveDetailRow = -1
 $script:ActiveSectionText = ""
 $script:ActiveSectionColor = $null
 
@@ -135,26 +136,40 @@ function Get-UsableSpinnerFrames {
 function Format-SectionSpinnerLine([string]$Frame, [string]$Text, [string]$Color, [string]$Detail = "") {
     $width = Get-ConsoleWidth
     $lineText = ("   {0}  {1}" -f $Frame, $Text)
-    if (-not [string]::IsNullOrWhiteSpace($Detail)) {
-        $lineText += "   " + $Detail
-    }
     return Paint ($lineText.PadRight($width)) $Color
 }
 
-function Start-SectionSpinner([string]$Text, [string]$Color) {
+function Format-SectionDetailLine([string]$Detail) {
+    $width = Get-ConsoleWidth
+    $lineText = if ([string]::IsNullOrWhiteSpace($Detail)) { "" } else { "      " + $Detail }
+    return Paint ($lineText.PadRight($width)) $S.Gray
+}
+
+function Start-SectionSpinner([string]$Text, [string]$Color, [switch]$UseDetailLine) {
     $script:ActiveSectionText = $Text
     $script:ActiveSectionColor = $Color
     $script:ActiveSectionRow = -1
+    $script:ActiveDetailRow = -1
 
     $frames = Get-UsableSpinnerFrames
     $initialLine = Format-SectionSpinnerLine -Frame $frames[0] -Text $Text -Color $Color
     Write-Host $initialLine
+    if ($UseDetailLine) {
+        Write-Host (Format-SectionDetailLine -Detail "")
+    }
 
     if (Test-CanAnimate) {
         try {
-            $script:ActiveSectionRow = [Console]::CursorTop - 1
+            $cursorTop = [Console]::CursorTop
+            if ($UseDetailLine) {
+                $script:ActiveSectionRow = $cursorTop - 2
+                $script:ActiveDetailRow = $cursorTop - 1
+            } else {
+                $script:ActiveSectionRow = $cursorTop - 1
+            }
         } catch {
             $script:ActiveSectionRow = -1
+            $script:ActiveDetailRow = -1
         }
         if ($script:ActiveSectionRow -ge 0) {
             for ($i = 1; $i -lt [Math]::Min($frames.Count, 5); $i++) {
@@ -177,6 +192,10 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     try {
         [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
         Write-Host -NoNewline (Format-SectionSpinnerLine -Frame $frame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor -Detail $Detail)
+        if ($script:ActiveDetailRow -ge 0) {
+            [Console]::SetCursorPosition(0, $script:ActiveDetailRow)
+            [Console]::Write((Format-SectionDetailLine -Detail $Detail))
+        }
         [Console]::Out.Flush()
         [Console]::SetCursorPosition($currentLeft, $currentTop)
     } catch {}
@@ -185,6 +204,7 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
 function Complete-SectionSpinner {
     if (-not (Test-CanAnimate)) {
         $script:ActiveSectionRow = -1
+        $script:ActiveDetailRow = -1
         $script:ActiveSectionText = ""
         $script:ActiveSectionColor = $null
         return
@@ -197,11 +217,16 @@ function Complete-SectionSpinner {
     try {
         [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
         [Console]::Write((Format-SectionSpinnerLine -Frame " " -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
+        if ($script:ActiveDetailRow -ge 0) {
+            [Console]::SetCursorPosition(0, $script:ActiveDetailRow)
+            [Console]::Write((Format-SectionDetailLine -Detail ""))
+        }
         [Console]::Out.Flush()
         [Console]::SetCursorPosition($currentLeft, $currentTop)
     } catch {}
 
     $script:ActiveSectionRow = -1
+    $script:ActiveDetailRow = -1
     $script:ActiveSectionText = ""
     $script:ActiveSectionColor = $null
 }
@@ -228,14 +253,14 @@ function Invoke-ProcessWithSpinner([string]$FilePath, [string[]]$ArgumentList, [
     return $proc.ExitCode
 }
 
-function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [string]$AccentColor) {
+function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [string]$AccentColor, [switch]$UseDetailLine) {
     $width = Get-ConsoleWidth
     $sectionText = ("[{0} {1}] {2}" -f $Kind, $Id, $Message)
     $ruleWidth = [Math]::Min($width, [Math]::Max(($sectionText.Length + 8), 54))
     $rule = ("-" * $ruleWidth)
 
     Complete-SectionSpinner
-    Start-SectionSpinner -Text $sectionText -Color $AccentColor
+    Start-SectionSpinner -Text $sectionText -Color $AccentColor -UseDetailLine:$UseDetailLine
     Write-Host (Paint $rule $S.Slate)
 }
 
@@ -248,7 +273,7 @@ function Step([string]$Message) {
     } elseif ($script:StepNo -eq 1) {
         Show-Banner
     }
-    Show-SectionHeader -Kind "PHASE" -Id $id -Message $Message -AccentColor $S.NeonBlue
+    Show-SectionHeader -Kind "PHASE" -Id $id -Message $Message -AccentColor $S.NeonBlue -UseDetailLine
 }
 
 function Show-Banner {
@@ -661,15 +686,52 @@ function Test-IPv4String([string]$Value) {
     return ($Value -match '^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$')
 }
 
-function Measure-DnsServerLatencyMs([string]$Server) {
+function Measure-DnsQueryLatencyMs([string]$Name, [string]$Server, [string]$Detail, [object]$TickRef = $null) {
+    $scriptText = @"
+try {
+    Resolve-DnsName -Name '$Name' -Server '$Server' -Type A -DnsOnly -ErrorAction Stop | Out-Null
+    exit 0
+} catch {
+    exit 1
+}
+"@
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-Command",$scriptText) -WindowStyle Hidden -PassThru
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+    while (-not $proc.HasExited) {
+        if ($null -ne $TickRef) {
+            Update-SectionSpinner -Detail $Detail -Tick $TickRef.Value
+            $TickRef.Value++
+        }
+        Start-Sleep -Milliseconds 80
+        try { $proc.Refresh() } catch {}
+    }
+
+    $sw.Stop()
+    if ($proc.ExitCode -eq 0) {
+        return [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+    }
+    return 2500.0
+}
+
+function Measure-DnsServerLatencyMs([string]$Server, [string]$DetailPrefix = "", [object]$TickRef = $null) {
     $targets = @("api.steampowered.com","dota2.com","microsoft.com")
     $samples = @()
     foreach ($name in $targets) {
         try {
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            Resolve-DnsName -Name $name -Server $Server -Type A -DnsOnly -ErrorAction Stop | Out-Null
-            $sw.Stop()
-            $samples += $sw.Elapsed.TotalMilliseconds
+            if ((Test-CanAnimate) -and $null -ne $TickRef) {
+                $detail = if ([string]::IsNullOrWhiteSpace($DetailPrefix)) {
+                    "dns lookup $name via $Server"
+                } else {
+                    "$DetailPrefix  $name via $Server"
+                }
+                $samples += (Measure-DnsQueryLatencyMs -Name $name -Server $Server -Detail $detail -TickRef $TickRef)
+            } else {
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                Resolve-DnsName -Name $name -Server $Server -Type A -DnsOnly -ErrorAction Stop | Out-Null
+                $sw.Stop()
+                $samples += $sw.Elapsed.TotalMilliseconds
+            }
         } catch {
             # Penalize failures heavily so unstable resolvers are never selected.
             $samples += 2500.0
@@ -729,17 +791,20 @@ function Resolve-DnsSelection {
         $rows = @()
         $orderedKeys = @($candidateMap.Keys | Sort-Object)
         $providerIndex = 0
+        $spinnerTick = 0
         foreach ($k in $orderedKeys) {
             $providerIndex++
+            $detailPrefix = ("dns benchmark [{0}/{1}] {2}" -f $providerIndex, $orderedKeys.Count, $k)
             if (Test-CanAnimate) {
-                Update-SectionSpinner -Detail ("dns benchmark [{0}/{1}] {2}" -f $providerIndex, $orderedKeys.Count, $k) -Tick $providerIndex
+                Update-SectionSpinner -Detail $detailPrefix -Tick $spinnerTick
+                $spinnerTick++
             } elseif (-not $VerboseOutput) {
-                Write-Host (Paint ("DNS benchmark [{0}/{1}] {2}" -f $providerIndex, $orderedKeys.Count, $k) $S.Gray)
+                Write-Host (Paint $detailPrefix $S.Gray)
             }
             $servers = $candidateMap[$k]
             $lat = @()
             foreach ($server in $servers) {
-                $lat += (Measure-DnsServerLatencyMs -Server $server)
+                $lat += (Measure-DnsServerLatencyMs -Server $server -DetailPrefix $detailPrefix -TickRef ([ref]$spinnerTick))
             }
             if ($lat.Count -eq 0) { continue }
             $score = [math]::Round((($lat | Measure-Object -Average).Average), 2)
