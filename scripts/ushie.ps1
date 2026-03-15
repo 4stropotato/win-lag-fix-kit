@@ -49,6 +49,9 @@ $script:ActiveDetailRow = -1
 $script:ActiveSectionText = ""
 $script:ActiveSectionColor = $null
 $script:HeaderSpinnerActive = $false
+$script:ActiveSectionRule = ""
+$script:ActiveUseDetailLine = $false
+$script:VerboseSectionPending = $false
 
 function Initialize-ConsoleRendering {
     try {
@@ -239,13 +242,41 @@ function Start-SectionSpinner([string]$Text, [string]$Color, [switch]$UseDetailL
 
     $frames = Get-UsableSpinnerFrames
     $initialLine = Format-SectionSpinnerLine -Frame $frames[0] -Text $Text -Color $Color
-    Write-Host $initialLine
+    if ($VerboseOutput) {
+        Microsoft.PowerShell.Utility\Write-Host -NoNewline $initialLine
+    } else {
+        Write-Host $initialLine
+    }
 
     if (Test-CanAnimate) {
         try {
-            $script:ActiveSectionRow = [Console]::CursorTop - 1
+            $script:ActiveSectionRow = if ($VerboseOutput) { [Console]::CursorTop } else { [Console]::CursorTop - 1 }
         } catch {
             $script:ActiveSectionRow = -1
+        }
+    }
+}
+
+function Ensure-VerboseSectionBody([switch]$NeedDetailLine) {
+    if (-not $VerboseOutput) { return }
+
+    $shouldPrint = $script:VerboseSectionPending
+    $needsDetail = $script:ActiveUseDetailLine -or $NeedDetailLine
+
+    if ($script:HeaderSpinnerActive) {
+        Stop-HeaderSpinnerTimer
+    }
+
+    if ($shouldPrint) {
+        Microsoft.PowerShell.Utility\Write-Host ""
+        Microsoft.PowerShell.Utility\Write-Host (Paint $script:ActiveSectionRule $S.Slate)
+        $script:VerboseSectionPending = $false
+    }
+
+    if ($needsDetail -and $script:ActiveDetailRow -lt 0) {
+        Microsoft.PowerShell.Utility\Write-Host (Format-SectionDetailLine -Detail "")
+        if (Test-CanAnimate) {
+            try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
         }
     }
 }
@@ -260,8 +291,8 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     $currentLeft = [Console]::CursorLeft
 
     try {
-        if ($VerboseOutput -and $script:ActiveDetailRow -ge 0 -and $script:HeaderSpinnerActive) {
-            Stop-HeaderSpinnerTimer
+        if ($VerboseOutput) {
+            Ensure-VerboseSectionBody -NeedDetailLine
         }
         if (-not $VerboseOutput) {
             [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
@@ -279,21 +310,17 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
 
 function Complete-SectionSpinner {
     Stop-HeaderSpinnerTimer
-    if ($VerboseOutput -and (Test-CanAnimate) -and $script:ActiveDetailRow -ge 0) {
-        $currentTop = [Console]::CursorTop
-        $currentLeft = [Console]::CursorLeft
-        try {
-            [Console]::SetCursorPosition(0, $script:ActiveDetailRow)
-            [Console]::Write(("".PadRight((Get-ConsoleWidth))))
-            [Console]::Out.Flush()
-            [Console]::SetCursorPosition($currentLeft, $currentTop)
-        } catch {}
-    }
     if ($VerboseOutput -or -not (Test-CanAnimate)) {
+        if ($VerboseOutput -and $script:VerboseSectionPending) {
+            Ensure-VerboseSectionBody
+        }
         $script:ActiveSectionRow = -1
         $script:ActiveDetailRow = -1
         $script:ActiveSectionText = ""
         $script:ActiveSectionColor = $null
+        $script:ActiveSectionRule = ""
+        $script:ActiveUseDetailLine = $false
+        $script:VerboseSectionPending = $false
         return
     }
     if ($script:ActiveSectionRow -lt 0) { return }
@@ -316,20 +343,21 @@ function Complete-SectionSpinner {
     $script:ActiveDetailRow = -1
     $script:ActiveSectionText = ""
     $script:ActiveSectionColor = $null
+    $script:ActiveSectionRule = ""
+    $script:ActiveUseDetailLine = $false
+    $script:VerboseSectionPending = $false
 }
 
 function Start-HeaderSpinnerTimer {
     if (-not (Test-CanAnimate)) { return }
-    if ($VerboseOutput) {
-        if ($script:ActiveDetailRow -lt 0) { return }
-    } elseif ($script:ActiveSectionRow -lt 0) {
+    if ($script:ActiveSectionRow -lt 0) {
         return
     }
     try {
         [UshieHeaderSpinnerHost]::Start(
-            $(if ($VerboseOutput) { $script:ActiveDetailRow } else { $script:ActiveSectionRow }),
-            $(if ($VerboseOutput) { "working..." } else { $script:ActiveSectionText }),
-            $(if ($VerboseOutput) { $S.Gray } else { $script:ActiveSectionColor }),
+            $script:ActiveSectionRow,
+            $script:ActiveSectionText,
+            $script:ActiveSectionColor,
             $S.Reset,
             (Get-UsableSpinnerFrames),
             80,
@@ -347,21 +375,6 @@ function Stop-HeaderSpinnerTimer {
     $script:HeaderSpinnerActive = $false
 }
 
-function Clear-VerboseDetailLine {
-    if (-not $VerboseOutput) { return }
-    if (-not (Test-CanAnimate)) { return }
-    if ($script:ActiveDetailRow -lt 0) { return }
-
-    $currentTop = [Console]::CursorTop
-    $currentLeft = [Console]::CursorLeft
-    try {
-        [Console]::SetCursorPosition(0, $script:ActiveDetailRow)
-        [Console]::Write(("".PadRight((Get-ConsoleWidth))))
-        [Console]::Out.Flush()
-        [Console]::SetCursorPosition($currentLeft, $currentTop)
-    } catch {}
-}
-
 function Write-Host {
     [CmdletBinding()]
     param(
@@ -374,9 +387,10 @@ function Write-Host {
     )
 
     process {
-        if ($script:HeaderSpinnerActive) {
+        if ($VerboseOutput -and $script:VerboseSectionPending) {
+            Ensure-VerboseSectionBody
+        } elseif ($script:HeaderSpinnerActive) {
             Stop-HeaderSpinnerTimer
-            Clear-VerboseDetailLine
         }
         Microsoft.PowerShell.Utility\Write-Host @PSBoundParameters
     }
@@ -390,9 +404,10 @@ function Out-Default {
     )
 
     begin {
-        if ($script:HeaderSpinnerActive) {
+        if ($VerboseOutput -and $script:VerboseSectionPending) {
+            Ensure-VerboseSectionBody
+        } elseif ($script:HeaderSpinnerActive) {
             Stop-HeaderSpinnerTimer
-            Clear-VerboseDetailLine
         }
         $buffer = New-Object System.Collections.Generic.List[object]
     }
@@ -404,6 +419,38 @@ function Out-Default {
     end {
         if ($buffer.Count -gt 0) {
             $buffer.ToArray() | Microsoft.PowerShell.Core\Out-Default
+        }
+    }
+}
+
+function Out-Host {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline = $true)]
+        [psobject]$InputObject,
+        [switch]$Paging
+    )
+
+    begin {
+        if ($VerboseOutput -and $script:VerboseSectionPending) {
+            Ensure-VerboseSectionBody
+        } elseif ($script:HeaderSpinnerActive) {
+            Stop-HeaderSpinnerTimer
+        }
+        $buffer = New-Object System.Collections.Generic.List[object]
+    }
+
+    process {
+        $null = $buffer.Add($InputObject)
+    }
+
+    end {
+        if ($buffer.Count -gt 0) {
+            $outHostParams = @{}
+            if ($PSBoundParameters.ContainsKey('Paging')) {
+                $outHostParams.Paging = $Paging
+            }
+            $buffer.ToArray() | Microsoft.PowerShell.Core\Out-Host @outHostParams
         }
     }
 }
@@ -438,15 +485,21 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
 
     Complete-SectionSpinner
     Start-SectionSpinner -Text $sectionText -Color $AccentColor -UseDetailLine:$UseDetailLine
-    Write-Host (Paint $rule $S.Slate)
-    if ($UseDetailLine -or $VerboseOutput) {
-        Write-Host (Format-SectionDetailLine -Detail "")
-        if (Test-CanAnimate) {
-            try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
+    $script:ActiveSectionRule = $rule
+    $script:ActiveUseDetailLine = [bool]$UseDetailLine
+    $script:VerboseSectionPending = $VerboseOutput
+
+    if (-not $VerboseOutput) {
+        Write-Host (Paint $rule $S.Slate)
+        if ($UseDetailLine) {
+            Write-Host (Format-SectionDetailLine -Detail "")
+            if (Test-CanAnimate) {
+                try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
+            }
         }
     }
     Start-HeaderSpinnerTimer
-    if (-not $VerboseOutput) {
+    if (Test-CanAnimate) {
         Start-Sleep -Milliseconds 120
     }
 }
