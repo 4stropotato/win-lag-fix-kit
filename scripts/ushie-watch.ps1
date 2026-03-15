@@ -7,7 +7,8 @@
     [switch]$DeepCapture,
     [int]$DeepCaptureMaxMB = 512,
     [switch]$KeepOutput,
-    [switch]$NoAutoFix
+    [switch]$NoAutoFix,
+    [switch]$UseRawSniff
 )
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
@@ -63,6 +64,7 @@ $script:DeepCaptureEtlPath = $null
 $script:DeepCapturePcapPath = $null
 $script:DeepCaptureError = $null
 $script:AutoFixEnabled = -not $NoAutoFix
+$script:UseRawSniffFallback = $UseRawSniff.IsPresent
 $script:AutoFixActions = [System.Collections.Generic.List[string]]::new()
 $script:AutoFixStatus = "Disabled"
 $script:AutoFixReason = "-"

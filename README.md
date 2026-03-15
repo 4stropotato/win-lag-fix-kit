@@ -2,16 +2,16 @@
 
 
 ## Files
-- `scripts/Run-AllInOne.ps1` - single all-in-one script (apply + verify)
-- `scripts/Watch-Network.ps1` - live Dota latency monitor (auto relay detect + session grading)
+- `scripts/ushie.ps1` - single all-in-one script (apply + verify)
+- `scripts/ushie-watch.ps1` - live Dota latency monitor (auto relay detect + session grading)
 
 ## Run (Administrator PowerShell)
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\scripts\Run-AllInOne.ps1 -m Safe
+.\scripts\ushie.ps1 -m Safe
 ```
 
-`Run-AllInOne.ps1` now auto-runs verify in the same execution by default.
+`ushie.ps1` now auto-runs verify in the same execution by default.
 
 Useful switches:
 - `-m Safe|Extreme` - profile mode (`Safe` default)
@@ -27,46 +27,46 @@ Useful switches:
 ## One-Run From GitHub
 Default one-liner (Safe mode):
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe"
 ```
 
 One-liner with mode/verbosity:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Extreme -v"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Extreme -v"
 ```
 
 One-liner with DNS override:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe -Dns Auto"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe -Dns Google"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe -Dns 'Cloudflare,Google'"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe -DnsServers 1.1.1.1,8.8.8.8,9.9.9.9"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe -Dns Auto"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe -Dns Google"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe -Dns 'Cloudflare,Google'"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe -DnsServers 1.1.1.1,8.8.8.8,9.9.9.9"
 ```
 
 Verify only:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -VerifyOnly -v"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -VerifyOnly -v"
 ```
 
 Manual / Help:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -h"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -h"
 ```
 
 ## Network Watch (Dota)
 Run locally (Admin PowerShell):
 ```powershell
-.\scripts\Watch-Network.ps1
+.\scripts\ushie-watch.ps1
 ```
 
 Wireshark-like deep capture mode (ETL + optional PCAP export):
 ```powershell
-.\scripts\Watch-Network.ps1 -DeepCapture
+.\scripts\ushie-watch.ps1 -DeepCapture
 ```
 
 Test + auto-remediate (post-session, default behavior):
 ```powershell
-.\scripts\Watch-Network.ps1
+.\scripts\ushie-watch.ps1
 ```
 
 Notes:
@@ -100,7 +100,7 @@ Notes:
   - ensures `Tailscale` / `sshd` auto-start if installed
 - Applies key debloat/privacy toggles (Copilot/activity/background-app related).
 - Applies profile-based shell tuning:
-  - `Safe`: restores default visual/shell responsiveness values
+  - `Safe`: removes Windows animations live, keeps the system no-restart, and avoids boot-level changes
   - `Extreme`: aggressive visual/shell performance values (display/perf focused toggles)
   - `Extreme`: removes menu/minimize/window animations (`MinAnimate`, `DWM Animations`, taskbar animations) while keeping ClearType font smoothing enabled
 - `Extreme` creates a System Restore Point (`Before-Ushie-Extreme`) before applying tweaks.
@@ -119,7 +119,8 @@ Notes:
 
 ## Notes
 - This is one-shot only (no persistent background task is created).
-- Some changes require reboot.
-- At the end of apply mode, script prompts: `Press Enter to restart now` (type `N` to skip).
+- `Safe` is live-only and does not require reboot.
+- `Extreme` includes boot-level changes and should be rebooted after apply.
+- At the end of apply mode, only `Extreme` prompts: `Press Enter to restart now` (type `N` to skip).
 - `Extreme` can reduce indexing/background features to prioritize responsiveness.
 - If lag remains even after this and clean driver install, use a clean official non-debloated Windows image.

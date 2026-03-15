@@ -118,12 +118,12 @@ function Show-Banner {
 
 function Show-Manual {
     Write-Host (Paint "Usage:" $S.NeonBlue)
-    Write-Host "  .\scripts\Run-AllInOne.ps1 [-m Safe|Extreme] [-v] [-Dns Auto|Cloudflare|Google|Quad9|OpenDNS|AdGuard|ControlD|DNSSB|Comodo] [-DnsServers ip,ip,...]"
-    Write-Host "  .\scripts\Run-AllInOne.ps1 -VerifyOnly [-v]"
-    Write-Host "  .\scripts\Run-AllInOne.ps1 -h"
+    Write-Host "  .\scripts\ushie.ps1 [-m Safe|Extreme] [-v] [-Dns Auto|Cloudflare|Google|Quad9|OpenDNS|AdGuard|ControlD|DNSSB|Comodo] [-DnsServers ip,ip,...]"
+    Write-Host "  .\scripts\ushie.ps1 -VerifyOnly [-v]"
+    Write-Host "  .\scripts\ushie.ps1 -h"
     Write-Host ""
     Write-Host (Paint "Main switches:" $S.NeonBlue)
-    Write-Host "  -m              Profile mode (Safe default, Extreme for max tuning)"
+    Write-Host "  -m              Profile mode (Safe = live/no-restart, Extreme = deeper tuning + reboot)"
     Write-Host "  -v              Verbose/full view output"
     Write-Host "  -Dns            DNS preset (Auto default)"
     Write-Host "  -DnsServers     Manual DNS override list (highest priority)"
@@ -134,11 +134,11 @@ function Show-Manual {
     Write-Host "  -h / -help / -man  Show this manual"
     Write-Host ""
     Write-Host (Paint "One-liner (Safe):" $S.NeonBlue)
-    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Safe"""
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Safe"""
     Write-Host (Paint "One-liner (Extreme):" $S.NeonBlue)
-    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -m Extreme -v"""
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -m Extreme -v"""
     Write-Host (Paint "One-liner (Help):" $S.NeonBlue)
-    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/Run-AllInOne.ps1'))) -h"""
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -Command ""& ([ScriptBlock]::Create((irm 'https://raw.githubusercontent.com/4stropotato/ushie/main/scripts/ushie.ps1'))) -h"""
 }
 
 function Print-Result([string]$Name, [object]$Value, [string]$Level = "OK") {
@@ -278,23 +278,25 @@ function Get-PowerCfgAcSettingIndex([string]$PlanGuid, [string]$SubGroup, [strin
 }
 
 function Apply-SafeProfile {
-    reg add "HKCU\Control Panel\Desktop" /v DragFullWindows /t REG_SZ /d 1 /f | Out-Null
+    reg add "HKCU\Control Panel\Desktop" /v DragFullWindows /t REG_SZ /d 0 /f | Out-Null
     reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f | Out-Null
-    reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 1 /f | Out-Null
+    reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 /f | Out-Null
 
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 1 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAnimations /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewAlphaSelect /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ListviewShadow /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f | Out-Null
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v ShowTaskViewButton /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 1 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v DisablePreviewDesktop /t REG_DWORD /d 1 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" /v VisualFXSetting /t REG_DWORD /d 2 /f | Out-Null
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Search" /v SearchboxTaskbarMode /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 1 /f | Out-Null
-    reg add "HKCU\Software\Microsoft\Windows\DWM" /v Animations /t REG_DWORD /d 1 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\DWM" /v EnableAeroPeek /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\DWM" /v Animations /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 0 /f | Out-Null
 
     reg delete "HKCU\Software\Policies\Microsoft\Windows\Explorer" /v DisableNotificationCenter /f 2>$null | Out-Null
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications" /v ToastEnabled /t REG_DWORD /d 1 /f | Out-Null
-    reg delete "HKCU\Control Panel\Desktop" /v UserPreferencesMask /f 2>$null | Out-Null
+    Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name UserPreferencesMask -Type Binary -Value ([byte[]](144,18,3,128,16,0,0,0))
 
     # Restore default mouse acceleration profile for non-Extreme mode.
     reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 1 /f | Out-Null
@@ -1111,7 +1113,11 @@ Step "Write profile marker"
 Set-ProfileMarker
 
 Step "GPU / Dota gaming optimization"
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f | Out-Null
+if ($script:RunProfile -eq "Extreme") {
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" /v HwSchMode /t REG_DWORD /d 2 /f | Out-Null
+} else {
+    Write-Detail "Safe mode skips HAGS because it is a restart-class change."
+}
 reg add "HKCU\Software\Microsoft\GameBar" /v AutoGameModeEnabled /t REG_DWORD /d 1 /f | Out-Null
 reg add "HKCU\Software\Microsoft\GameBar" /v GameDVR_Enabled /t REG_DWORD /d 0 /f | Out-Null
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR" /v AppCaptureEnabled /t REG_DWORD /d 0 /f | Out-Null
@@ -1209,19 +1215,23 @@ if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
     Start-Service sshd -ErrorAction SilentlyContinue
 }
 
-Step "Enable HPET"
-pnputil /enable-device "ACPI\PNP0103\0" | Out-Null
+if ($script:RunProfile -eq "Extreme") {
+    Step "Enable HPET"
+    pnputil /enable-device "ACPI\PNP0103\0" | Out-Null
 
-Step "Disable hypervisor/VBS for low-latency"
-Invoke-BcdSet "hypervisorlaunchtype" "off"
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f | Out-Null
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v Enabled /t REG_DWORD /d 0 /f | Out-Null
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LsaCfgFlags /t REG_DWORD /d 0 /f | Out-Null
+    Step "Disable hypervisor/VBS for low-latency"
+    Invoke-BcdSet "hypervisorlaunchtype" "off"
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v Enabled /t REG_DWORD /d 0 /f | Out-Null
+    reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LsaCfgFlags /t REG_DWORD /d 0 /f | Out-Null
 
-if (-not $KeepWSL) {
-    Step "Disable WSL / VirtualMachinePlatform"
-    dism /online /disable-feature /featurename:VirtualMachinePlatform /norestart | Out-Null
-    dism /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart | Out-Null
+    if (-not $KeepWSL) {
+        Step "Disable WSL / VirtualMachinePlatform"
+        dism /online /disable-feature /featurename:VirtualMachinePlatform /norestart | Out-Null
+        dism /online /disable-feature /featurename:Microsoft-Windows-Subsystem-Linux /norestart | Out-Null
+    }
+} else {
+    Write-Detail "Safe mode skips HPET, HAGS, hypervisor/VBS, and WSL changes so it stays no-restart."
 }
 
 Step "Set max performance power policy (one-time)"
@@ -1248,7 +1258,11 @@ Print-Result "ProfileApplied" $script:RunProfile "OK"
 $dnsLevel = if ($script:DnsSelection -eq "<not set>") { "WARN" } else { "OK" }
 Print-Result "DNSApplied" $script:DnsSelection $dnsLevel
 $hags = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" -Name HwSchMode -ErrorAction SilentlyContinue).HwSchMode
-Print-Result "HwSchMode(HAGS)" $hags "OK"
+if ($script:RunProfile -eq "Safe" -and $null -eq $hags) {
+    Print-Result "HwSchMode(HAGS)" "Skipped in Safe (no-restart profile)" "OK"
+} else {
+    Print-Result "HwSchMode(HAGS)" $hags "OK"
+}
 $mmcss = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -ErrorAction SilentlyContinue
 Print-Result "NetworkThrottlingIndex" $mmcss.NetworkThrottlingIndex "OK"
 $mma = Get-MMAgent -ErrorAction SilentlyContinue
@@ -1264,4 +1278,9 @@ if (-not $SkipVerify) {
 Write-Host ""
 Write-Host (Paint "   >>> USHIE PASS COMPLETE. NO PERSISTENT BACKGROUND TASK CREATED <<<" $S.Green)
 Write-Host ((Paint "   >>> BACKUP PATH: " $S.Cyan) + $backupDir)
-Prompt-RestartNow
+if ($script:RunProfile -eq "Extreme") {
+    Write-Host (Paint "   >>> EXTREME APPLIED. RESTART TO LOCK IN BOOT-LEVEL TWEAKS. <<<" $S.Yellow)
+    Prompt-RestartNow
+} else {
+    Write-Host (Paint "   >>> SAFE APPLIED LIVE. NO RESTART REQUIRED. <<<" $S.Green)
+}
