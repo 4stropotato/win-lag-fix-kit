@@ -33,6 +33,7 @@ function New-Style {
         NeonBlue   = "$esc[38;2;0;210;255m"
         NeonPink   = "$esc[38;2;255;90;180m"
         NeonYellow = "$esc[38;2;255;220;90m"
+        NeonMint   = "$esc[38;2;85;255;190m"
         Slate      = "$esc[38;2;160;170;185m"
     }
 }
@@ -71,18 +72,52 @@ function Assert-Admin {
     }
 }
 
+function Get-ConsoleWidth {
+    try {
+        return [Math]::Max([Console]::WindowWidth - 1, 72)
+    } catch {
+        return 100
+    }
+}
+
+function Test-CanAnimate {
+    try {
+        return ($Host.Name -eq "ConsoleHost" -and -not [Console]::IsOutputRedirected)
+    } catch {
+        return $false
+    }
+}
+
+function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [string]$AccentColor) {
+    $width = Get-ConsoleWidth
+    $header = ("[{0} {1}] {2}" -f $Kind, $Id, $Message)
+    $ruleWidth = [Math]::Min($width, [Math]::Max(($header.Length + 8), 54))
+    $rule = ("-" * $ruleWidth)
+
+    if (Test-CanAnimate) {
+        $frames = @(">", ">>", ">>>", ">>>>")
+        foreach ($frame in $frames) {
+            $scan = ("[{0} {1}] {2} {3}" -f $Kind, $Id, $frame.PadRight(4), $Message).PadRight($width)
+            Write-Host -NoNewline ("`r" + (Paint $scan $AccentColor))
+            Start-Sleep -Milliseconds 45
+        }
+        Write-Host -NoNewline ("`r" + (" " * $width) + "`r")
+    }
+
+    Write-Host (Paint $header $AccentColor)
+    Write-Host (Paint $rule $S.Slate)
+}
+
 function Step([string]$Message) {
     $script:StepNo++
     $id = "{0:d2}" -f $script:StepNo
-    $line = ("-" * 78)
     if (-not $VerboseOutput) {
         Clear-Host
         Show-Banner
     } elseif ($script:StepNo -eq 1) {
         Show-Banner
     }
-    Write-Host (Paint ("[PHASE " + $id + "] " + $Message) $S.NeonBlue)
-    Write-Host (Paint $line $S.Slate)
+    Show-SectionHeader -Kind "PHASE" -Id $id -Message $Message -AccentColor $S.NeonBlue
 }
 
 function Show-Banner {
@@ -755,15 +790,13 @@ function Get-ActiveAdapterDnsStatus {
 function Verify-Section([string]$Title) {
     $script:CheckNo++
     $id = "{0:d2}" -f $script:CheckNo
-    $line = ("-" * 78)
     if (-not $VerboseOutput) {
         Clear-Host
         Show-Banner
     } elseif ($script:CheckNo -eq 1) {
         Write-Host ""
     }
-    Write-Host (Paint ("[CHECK " + $id + "] " + $Title) $S.NeonBlue)
-    Write-Host (Paint $line $S.Slate)
+    Show-SectionHeader -Kind "CHECK" -Id $id -Message $Title -AccentColor $S.NeonMint
 }
 
 function Invoke-InternalVerify {
