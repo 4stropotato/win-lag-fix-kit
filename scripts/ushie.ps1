@@ -459,13 +459,13 @@ function Prompt-RestartNow {
 
     if (-not $canPrompt) { return }
 
-    Write-Host (Paint "   >>> PRESS ENTER TO RESTART NOW (TYPE N THEN ENTER TO SKIP) <<<" $S.Yellow)
+    Write-Host (Paint "   Press Enter to restart now. Type N then Enter to skip." $S.Yellow)
     $answer = Read-Host "   Restart now?"
     if ([string]::IsNullOrWhiteSpace($answer) -or $answer.Trim().ToLowerInvariant() -eq "y") {
-        Write-Host (Paint "   >>> Restarting now..." $S.Yellow)
+        Write-Host (Paint "   Restarting now..." $S.Yellow)
         shutdown /r /t 0 | Out-Null
     } else {
-        Write-Host (Paint "   >>> Restart skipped. Reboot later to finalize changes." $S.Gray)
+        Write-Host (Paint "   Restart skipped. Reboot later to finalize changes." $S.Gray)
     }
 }
 
@@ -1747,12 +1747,12 @@ if (-not $VerboseOutput) {
     Show-Banner
 }
 Write-Host ""
-Write-Host (Paint "   >>> USHIE PASS COMPLETE. NO PERSISTENT BACKGROUND TASK CREATED <<<" $S.Green)
-Write-Host ((Paint "   >>> BACKUP PATH: " $S.Cyan) + $backupDir)
+Write-Host (Paint "   Ushie pass complete. No persistent background task created." $S.Green)
+Write-Host ((Paint "   Backup path: " $S.Cyan) + $backupDir)
 if ($script:RunProfile -eq "Extreme") {
-    Write-Host (Paint "   >>> EXTREME APPLIED. RESTART TO LOCK IN BOOT-LEVEL TWEAKS. <<<" $S.Yellow)
+    Write-Host (Paint "   Extreme applied. Restart to lock in boot-level tweaks." $S.Yellow)
     Prompt-RestartNow
 } else {
-    Write-Host (Paint "   >>> SAFE APPLIED LIVE. NO RESTART REQUIRED. <<<" $S.Green)
+    Write-Host (Paint "   Safe applied live. No restart required." $S.Green)
 }
 
