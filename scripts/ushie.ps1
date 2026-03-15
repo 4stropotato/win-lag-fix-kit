@@ -333,7 +333,6 @@ function Complete-SectionSpinner {
 function Start-SectionSpinnerTimer {
     if (-not (Test-CanAnimate)) { return }
     if ($script:ActiveSectionRow -lt 0) { return }
-    if ($script:ActiveDetailRow -lt 0) { return }
     try {
         [UshieSpinnerTimerHost]::Start(
             $script:ActiveSectionRow,
@@ -393,6 +392,10 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
         if (Test-CanAnimate) {
             try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
         }
+    }
+    Start-SectionSpinnerTimer
+    if (Test-CanAnimate) {
+        Start-Sleep -Milliseconds 100
     }
 }
 
@@ -908,7 +911,6 @@ function Resolve-DnsSelection {
     }
 
     if ($dnsMode -ieq "Auto") {
-        Start-SectionSpinnerTimer
         if (-not (Test-CanAnimate)) {
             Write-Host (Paint "Benchmarking DNS providers..." $S.Gray)
         }
@@ -949,11 +951,9 @@ function Resolve-DnsSelection {
             }
         }
         if ($rows.Count -eq 0) {
-            Stop-SectionSpinnerTimer
             throw "DNS auto benchmark failed to score candidates. Check network connectivity or use -DnsServers."
         }
         $best = $rows | Sort-Object ScoreMs | Select-Object -First 1
-        Stop-SectionSpinnerTimer
         Write-Detail ("DNS Auto benchmark winner: " + $best.Provider + " (" + $best.ScoreMs + "ms)")
         if ($VerboseOutput) {
             Write-Host ""
@@ -1033,7 +1033,6 @@ function Clear-PathPattern([string]$Pattern) {
 }
 
 function Clear-TempAndCache([string]$CurrentProfile) {
-    Start-SectionSpinnerTimer
     $basePatterns = @(
         "$env:TEMP\*",
         "$env:LOCALAPPDATA\Temp\*",
@@ -1082,7 +1081,6 @@ function Clear-TempAndCache([string]$CurrentProfile) {
         Start-Process -FilePath cleanmgr.exe -ArgumentList "/d C: /VERYLOWDISK" -WindowStyle Hidden -ErrorAction SilentlyContinue
         $null = Invoke-ProcessWithSpinner -FilePath "dism.exe" -ArgumentList @("/online","/Cleanup-Image","/StartComponentCleanup") -Label "DISM component cleanup in progress..." -AccentColor $S.NeonYellow
     }
-    Stop-SectionSpinnerTimer
 }
 
 function Get-DirectorySizeBytes([string]$Path) {
