@@ -48,7 +48,6 @@ $script:ActiveSectionRow = -1
 $script:ActiveDetailRow = -1
 $script:ActiveSectionText = ""
 $script:ActiveSectionColor = $null
-$script:SpinnerTimerActive = $false
 
 function Initialize-ConsoleRendering {
     try {
@@ -61,109 +60,6 @@ function Initialize-ConsoleRendering {
 }
 
 Initialize-ConsoleRendering
-
-if (-not ("UshieSpinnerTimerHost" -as [type])) {
-    Add-Type @"
-using System;
-using System.Threading;
-
-public static class UshieSpinnerTimerHost
-{
-    static readonly object Sync = new object();
-    static Timer Timer;
-    static string[] Frames = new[] { "|", "/", "-", "\\" };
-    static int Index;
-    static int SectionRow = -1;
-    static int DetailRow = -1;
-    static string SectionText = "";
-    static string DetailText = "";
-    static string SectionColor = "";
-    static string DetailColor = "";
-    static string Reset = "";
-
-    static int Width()
-    {
-        try { return Math.Max(Console.WindowWidth - 1, 72); }
-        catch { return 100; }
-    }
-
-    static string Pad(string value)
-    {
-        value = value ?? "";
-        int width = Width();
-        return value.Length < width ? value.PadRight(width) : value;
-    }
-
-    static void Render(string frame)
-    {
-        int left;
-        int top;
-        try {
-            left = Console.CursorLeft;
-            top = Console.CursorTop;
-        } catch {
-            return;
-        }
-
-        try {
-            Console.SetCursorPosition(0, SectionRow);
-            Console.Write(SectionColor + Pad("   " + frame + "  " + SectionText) + Reset);
-            if (DetailRow >= 0) {
-                Console.SetCursorPosition(0, DetailRow);
-                string detailLine = string.IsNullOrWhiteSpace(DetailText) ? "" : "      " + DetailText;
-                Console.Write(DetailColor + Pad(detailLine) + Reset);
-            }
-            Console.Out.Flush();
-            Console.SetCursorPosition(left, top);
-        } catch {}
-    }
-
-    static void Tick(object state)
-    {
-        lock (Sync) {
-            if (SectionRow < 0) return;
-            string frame = Frames[Index % Frames.Length];
-            Index++;
-            Render(frame);
-        }
-    }
-
-    public static void Start(int sectionRow, int detailRow, string sectionText, string sectionColor, string detailColor, string reset, string[] frames, int intervalMs)
-    {
-        lock (Sync) {
-            Stop();
-            SectionRow = sectionRow;
-            DetailRow = detailRow;
-            SectionText = sectionText ?? "";
-            DetailText = "";
-            SectionColor = sectionColor ?? "";
-            DetailColor = detailColor ?? "";
-            Reset = reset ?? "";
-            Frames = (frames != null && frames.Length > 0) ? frames : new[] { "|", "/", "-", "\\" };
-            Index = 0;
-            Timer = new Timer(Tick, null, 0, intervalMs);
-        }
-    }
-
-    public static void SetDetail(string detail)
-    {
-        lock (Sync) {
-            DetailText = detail ?? "";
-        }
-    }
-
-    public static void Stop()
-    {
-        lock (Sync) {
-            if (Timer != null) {
-                Timer.Dispose();
-                Timer = null;
-            }
-        }
-    }
-}
-"@
-}
 
 function Paint([string]$Text, [string]$Color) {
     if (-not $Color) { return $Text }
@@ -266,7 +162,7 @@ function Start-SectionSpinner([string]$Text, [string]$Color, [switch]$UseDetailL
             $script:ActiveSectionRow = -1
         }
         if ($script:ActiveSectionRow -ge 0) {
-            for ($i = 1; $i -lt [Math]::Min($frames.Count, 5); $i++) {
+            for ($i = 1; $i -le [Math]::Min($frames.Count - 1, 5); $i++) {
                 Update-SectionSpinner -Detail "" -Tick $i
                 Start-Sleep -Milliseconds 80
             }
@@ -277,10 +173,6 @@ function Start-SectionSpinner([string]$Text, [string]$Color, [switch]$UseDetailL
 function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     if (-not (Test-CanAnimate)) { return }
     if ($script:ActiveSectionRow -lt 0) { return }
-    if ($script:SpinnerTimerActive) {
-        try { [UshieSpinnerTimerHost]::SetDetail($Detail) } catch {}
-        return
-    }
 
     $frames = Get-UsableSpinnerFrames
     $frame = $frames[$Tick % $frames.Count]
@@ -300,7 +192,6 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
 }
 
 function Complete-SectionSpinner {
-    Stop-SectionSpinnerTimer
     if (-not (Test-CanAnimate)) {
         $script:ActiveSectionRow = -1
         $script:ActiveDetailRow = -1
@@ -328,32 +219,6 @@ function Complete-SectionSpinner {
     $script:ActiveDetailRow = -1
     $script:ActiveSectionText = ""
     $script:ActiveSectionColor = $null
-}
-
-function Start-SectionSpinnerTimer {
-    if (-not (Test-CanAnimate)) { return }
-    if ($script:ActiveSectionRow -lt 0) { return }
-    try {
-        [UshieSpinnerTimerHost]::Start(
-            $script:ActiveSectionRow,
-            $script:ActiveDetailRow,
-            $script:ActiveSectionText,
-            $script:ActiveSectionColor,
-            $S.Gray,
-            $S.Reset,
-            (Get-UsableSpinnerFrames),
-            80
-        )
-        $script:SpinnerTimerActive = $true
-    } catch {
-        $script:SpinnerTimerActive = $false
-    }
-}
-
-function Stop-SectionSpinnerTimer {
-    if (-not $script:SpinnerTimerActive) { return }
-    try { [UshieSpinnerTimerHost]::Stop() } catch {}
-    $script:SpinnerTimerActive = $false
 }
 
 
@@ -392,10 +257,6 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
         if (Test-CanAnimate) {
             try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
         }
-    }
-    Start-SectionSpinnerTimer
-    if (Test-CanAnimate) {
-        Start-Sleep -Milliseconds 100
     }
 }
 
