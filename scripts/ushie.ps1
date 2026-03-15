@@ -88,21 +88,68 @@ function Test-CanAnimate {
     }
 }
 
+function Clear-LiveLine {
+    if (-not (Test-CanAnimate)) { return }
+    $width = Get-ConsoleWidth
+    Write-Host -NoNewline ("`r" + (" " * $width) + "`r")
+}
+
+function Show-LoadingPulse([string]$Kind, [string]$Message, [string]$AccentColor) {
+    if (-not (Test-CanAnimate)) { return }
+
+    $width = Get-ConsoleWidth
+    $verb = if ($Kind -eq "CHECK") { "SCANNING" } else { "LOADING" }
+    $bars = @(
+        "[>           ]",
+        "[==>         ]",
+        "[====>       ]",
+        "[======>     ]",
+        "[========>   ]",
+        "[==========> ]",
+        "[=========== ]",
+        "[============]"
+    )
+
+    foreach ($bar in $bars) {
+        $line = ("   {0} {1} {2}" -f $verb, $bar, $Message).PadRight($width)
+        Write-Host -NoNewline ("`r" + (Paint $line $AccentColor))
+        Start-Sleep -Milliseconds 70
+    }
+
+    Clear-LiveLine
+}
+
+function Invoke-ProcessWithSpinner([string]$FilePath, [string[]]$ArgumentList, [string]$Label, [string]$AccentColor) {
+    if (-not (Test-CanAnimate)) {
+        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WindowStyle Hidden -PassThru -Wait
+        return $proc.ExitCode
+    }
+
+    $frames = @("|", "/", "-", "\")
+    $width = Get-ConsoleWidth
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WindowStyle Hidden -PassThru
+    $i = 0
+
+    while (-not $proc.HasExited) {
+        $spinner = $frames[$i % $frames.Count]
+        $line = ("   {0} {1}" -f $spinner, $Label).PadRight($width)
+        Write-Host -NoNewline ("`r" + (Paint $line $AccentColor))
+        Start-Sleep -Milliseconds 120
+        try { $proc.Refresh() } catch {}
+        $i++
+    }
+
+    Clear-LiveLine
+    return $proc.ExitCode
+}
+
 function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [string]$AccentColor) {
     $width = Get-ConsoleWidth
     $header = ("[{0} {1}] {2}" -f $Kind, $Id, $Message)
     $ruleWidth = [Math]::Min($width, [Math]::Max(($header.Length + 8), 54))
     $rule = ("-" * $ruleWidth)
 
-    if (Test-CanAnimate) {
-        $frames = @(">", ">>", ">>>", ">>>>")
-        foreach ($frame in $frames) {
-            $scan = ("[{0} {1}] {2} {3}" -f $Kind, $Id, $frame.PadRight(4), $Message).PadRight($width)
-            Write-Host -NoNewline ("`r" + (Paint $scan $AccentColor))
-            Start-Sleep -Milliseconds 45
-        }
-        Write-Host -NoNewline ("`r" + (" " * $width) + "`r")
-    }
+    Show-LoadingPulse -Kind $Kind -Message $Message -AccentColor $AccentColor
 
     Write-Host (Paint $header $AccentColor)
     Write-Host (Paint $rule $S.Slate)
@@ -594,7 +641,17 @@ function Resolve-DnsSelection {
         }
 
         $rows = @()
-        foreach ($k in $candidateMap.Keys) {
+        $orderedKeys = @($candidateMap.Keys | Sort-Object)
+        $providerIndex = 0
+        foreach ($k in $orderedKeys) {
+            $providerIndex++
+            if (Test-CanAnimate) {
+                $width = Get-ConsoleWidth
+                $line = ("   DNS BENCH [{0}/{1}] {2}" -f $providerIndex, $orderedKeys.Count, $k).PadRight($width)
+                Write-Host -NoNewline ("`r" + (Paint $line $S.NeonMint))
+            } elseif (-not $VerboseOutput) {
+                Write-Host (Paint ("DNS benchmark [{0}/{1}] {2}" -f $providerIndex, $orderedKeys.Count, $k) $S.Gray)
+            }
             $servers = $candidateMap[$k]
             $lat = @()
             foreach ($server in $servers) {
@@ -609,6 +666,7 @@ function Resolve-DnsSelection {
                 ScoreMs = $score
             }
         }
+        Clear-LiveLine
         if ($rows.Count -eq 0) {
             throw "DNS auto benchmark failed to score candidates. Check network connectivity or use -DnsServers."
         }
@@ -726,7 +784,7 @@ function Clear-TempAndCache([string]$CurrentProfile) {
         # Winutil-aligned component cleanup; may take longer on first run.
         Write-Host (Paint "Running component cleanup (DISM). This can take several minutes..." $S.Yellow)
         Start-Process -FilePath cleanmgr.exe -ArgumentList "/d C: /VERYLOWDISK" -WindowStyle Hidden -ErrorAction SilentlyContinue
-        dism /online /Cleanup-Image /StartComponentCleanup | Out-Null
+        $null = Invoke-ProcessWithSpinner -FilePath "dism.exe" -ArgumentList @("/online","/Cleanup-Image","/StartComponentCleanup") -Label "DISM component cleanup in progress..." -AccentColor $S.NeonYellow
     }
 }
 
