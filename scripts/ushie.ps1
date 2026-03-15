@@ -49,6 +49,7 @@ $script:ActiveDetailRow = -1
 $script:ActiveSectionText = ""
 $script:ActiveSectionColor = $null
 $script:HeaderSpinnerActive = $false
+$script:SectionSpinSeed = 0
 
 function Initialize-ConsoleRendering {
     try {
@@ -219,9 +220,15 @@ function Format-SectionSpinnerLine([string]$Frame, [string]$Text, [string]$Color
     return Paint ($lineText.PadRight($width)) $Color
 }
 
-function Format-SectionDetailLine([string]$Detail) {
+function Format-SectionDetailLine([string]$Detail, [string]$Frame = "") {
     $width = Get-ConsoleWidth
-    $lineText = if ([string]::IsNullOrWhiteSpace($Detail)) { "" } else { "      " + $Detail }
+    $lineText = if ([string]::IsNullOrWhiteSpace($Detail)) {
+        ""
+    } elseif ([string]::IsNullOrWhiteSpace($Frame)) {
+        "      " + $Detail
+    } else {
+        ("   {0}  {1}" -f $Frame, $Detail)
+    }
     return Paint ($lineText.PadRight($width)) $S.Gray
 }
 
@@ -263,9 +270,35 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
         }
         if ($script:ActiveDetailRow -ge 0) {
             [Console]::SetCursorPosition(0, $script:ActiveDetailRow)
-            [Console]::Write((Format-SectionDetailLine -Detail $Detail))
+            $detailFrame = if ($VerboseOutput -and -not [string]::IsNullOrWhiteSpace($Detail)) { $frame } else { "" }
+            [Console]::Write((Format-SectionDetailLine -Detail $Detail -Frame $detailFrame))
         }
         [Console]::Out.Flush()
+        [Console]::SetCursorPosition($currentLeft, $currentTop)
+    } catch {}
+}
+
+function Invoke-VerboseSectionSpinBurst([int]$FrameCount = 4) {
+    if (-not $VerboseOutput) { return }
+    if (-not (Test-CanAnimate)) { return }
+    if ($script:ActiveSectionRow -lt 0) { return }
+
+    $frames = Get-UsableSpinnerFrames
+    if ($frames.Count -eq 0) { return }
+
+    $start = $script:SectionSpinSeed % $frames.Count
+    $script:SectionSpinSeed = ($script:SectionSpinSeed + $FrameCount) % $frames.Count
+    $currentTop = [Console]::CursorTop
+    $currentLeft = [Console]::CursorLeft
+
+    try {
+        for ($i = 0; $i -lt $FrameCount; $i++) {
+            $frame = $frames[($start + $i) % $frames.Count]
+            [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
+            [Console]::Write((Format-SectionSpinnerLine -Frame $frame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
+            [Console]::Out.Flush()
+            Start-Sleep -Milliseconds 80
+        }
         [Console]::SetCursorPosition($currentLeft, $currentTop)
     } catch {}
 }
@@ -302,13 +335,10 @@ function Complete-SectionSpinner {
 }
 
 function Start-HeaderSpinnerTimer {
+    if ($VerboseOutput) { return }
     if (-not (Test-CanAnimate)) { return }
     if ($script:ActiveSectionRow -lt 0) { return }
     try {
-        $initialDelay = 0
-        if ($VerboseOutput) {
-            $initialDelay = if ($script:ActiveDetailRow -ge 0) { 420 } else { 900 }
-        }
         [UshieHeaderSpinnerHost]::Start(
             $script:ActiveSectionRow,
             $script:ActiveSectionText,
@@ -316,7 +346,7 @@ function Start-HeaderSpinnerTimer {
             $S.Reset,
             (Get-UsableSpinnerFrames),
             80,
-            $initialDelay
+            0
         )
         $script:HeaderSpinnerActive = $true
     } catch {
@@ -411,8 +441,11 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
             try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
         }
     }
-    Start-HeaderSpinnerTimer
-    if (Test-CanAnimate -and -not $VerboseOutput) {
+    if ($VerboseOutput) {
+        $frameCount = if ($UseDetailLine) { 4 } else { 5 }
+        Invoke-VerboseSectionSpinBurst -FrameCount $frameCount
+    } else {
+        Start-HeaderSpinnerTimer
         Start-Sleep -Milliseconds 120
     }
 }
