@@ -48,6 +48,18 @@ $script:ActiveSectionRow = -1
 $script:ActiveSectionText = ""
 $script:ActiveSectionColor = $null
 
+function Initialize-ConsoleRendering {
+    try {
+        if (-not [Console]::IsOutputRedirected) {
+            $utf8 = New-Object System.Text.UTF8Encoding($false)
+            [Console]::OutputEncoding = $utf8
+            $global:OutputEncoding = $utf8
+        }
+    } catch {}
+}
+
+Initialize-ConsoleRendering
+
 function Paint([string]$Text, [string]$Color) {
     if (-not $Color) { return $Text }
     return "$Color$Text$($S.Reset)"
@@ -85,22 +97,16 @@ function Get-ConsoleWidth {
 
 function Test-CanAnimate {
     try {
-        return ($Host.Name -eq "ConsoleHost" -and -not [Console]::IsOutputRedirected)
+        if ([Console]::IsOutputRedirected) { return $false }
+        $null = $Host.UI.RawUI.WindowSize.Width
+        $null = [Console]::CursorTop
+        return $true
     } catch {
         return $false
     }
 }
 
-function Get-SpinnerFrames {
-    try {
-        $encodingName = [Console]::OutputEncoding.WebName
-        if ($encodingName -match "utf") {
-            return @("⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏")
-        }
-    } catch {}
 
-    return @("|","/","-","\")
-}
 
 function Get-UsableSpinnerFrames {
     try {
@@ -124,11 +130,7 @@ function Get-UsableSpinnerFrames {
     return @("|","/","-","\")
 }
 
-function Clear-LiveLine {
-    if (-not (Test-CanAnimate)) { return }
-    $width = Get-ConsoleWidth
-    Write-Host -NoNewline ("`r" + (" " * $width) + "`r")
-}
+
 
 function Format-SectionSpinnerLine([string]$Frame, [string]$Text, [string]$Color, [string]$Detail = "") {
     $width = Get-ConsoleWidth
@@ -154,6 +156,12 @@ function Start-SectionSpinner([string]$Text, [string]$Color) {
         } catch {
             $script:ActiveSectionRow = -1
         }
+        if ($script:ActiveSectionRow -ge 0) {
+            for ($i = 1; $i -lt [Math]::Min($frames.Count, 5); $i++) {
+                Update-SectionSpinner -Detail "" -Tick $i
+                Start-Sleep -Milliseconds 80
+            }
+        }
     }
 }
 
@@ -169,15 +177,12 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     try {
         [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
         Write-Host -NoNewline (Format-SectionSpinnerLine -Frame $frame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor -Detail $Detail)
+        [Console]::Out.Flush()
         [Console]::SetCursorPosition($currentLeft, $currentTop)
     } catch {}
 }
 
-function Complete-SectionSpinner {
-    $script:ActiveSectionRow = -1
-    $script:ActiveSectionText = ""
-    $script:ActiveSectionColor = $null
-}
+
 
 function Invoke-ProcessWithSpinner([string]$FilePath, [string[]]$ArgumentList, [string]$Label, [string]$AccentColor) {
     if (-not (Test-CanAnimate)) {
@@ -467,7 +472,7 @@ function Apply-ExtremeProfile {
     # Disable cursor blink - removes unnecessary screen redraws.
     reg add "HKCU\Control Panel\Desktop" /v CursorBlinkRate /t REG_SZ /d -1 /f | Out-Null
 
-    # Disable mouse acceleration (enhanced pointer precision) — flat, predictable aim.
+    # Disable mouse acceleration (enhanced pointer precision) - flat, predictable aim.
     reg add "HKCU\Control Panel\Mouse" /v MouseSpeed /t REG_SZ /d 0 /f | Out-Null
     reg add "HKCU\Control Panel\Mouse" /v MouseThreshold1 /t REG_SZ /d 0 /f | Out-Null
     reg add "HKCU\Control Panel\Mouse" /v MouseThreshold2 /t REG_SZ /d 0 /f | Out-Null
@@ -480,7 +485,7 @@ function Apply-ExtremeSystemWide {
 }
 
 function Apply-ExtremeTelemetry {
-    # Telemetry and privacy registry — winutil essential set.
+    # Telemetry and privacy registry - winutil essential set.
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f | Out-Null
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Privacy" /v TailoredExperiencesWithDiagnosticDataEnabled /t REG_DWORD /d 0 /f | Out-Null
     reg add "HKCU\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy" /v HasAccepted /t REG_DWORD /d 0 /f | Out-Null
@@ -496,14 +501,14 @@ function Apply-ExtremeTelemetry {
     # Bing search in Start Menu off.
     reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f | Out-Null
 
-    # Delivery Optimization: local only — no peer upload to random internet PCs.
+    # Delivery Optimization: local only - no peer upload to random internet PCs.
     reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DeliveryOptimization\Config" /v DODownloadMode /t REG_DWORD /d 0 /f | Out-Null
 
     # SvcHost split: raise threshold to total RAM so services share fewer host processes.
     $ramKB = [int]((Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1KB)
     reg add "HKLM\SYSTEM\CurrentControlSet\Control" /v SvcHostSplitThresholdInKB /t REG_DWORD /d $ramKB /f | Out-Null
 
-    # Teredo tunneling off — not needed on modern networks, reduces latency jitter.
+    # Teredo tunneling off - not needed on modern networks, reduces latency jitter.
     netsh interface teredo set state disabled | Out-Null
     # Prefer IPv4 over IPv6 (bit 5 = 32) for lower latency on private networks.
     reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters" /v DisabledComponents /t REG_DWORD /d 32 /f | Out-Null
@@ -1230,9 +1235,9 @@ reg add "HKLM\System\CurrentControlSet\Control\Session Manager\Power" /v Hiberna
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f | Out-Null
 
 Step "Shell responsiveness baseline (both profiles)"
-# Instant menus + explorer startup — applies to Safe and Extreme.
+# Instant menus + explorer startup - applies to Safe and Extreme.
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Serialize" /v StartupDelayInMSec /t REG_DWORD /d 0 /f | Out-Null
-# App hang / kill timeouts — huge impact on how responsive the desktop feels.
+# App hang / kill timeouts - huge impact on how responsive the desktop feels.
 # Default HungAppTimeout=5000, WaitToKillAppTimeout=20000. These are way too long.
 reg add "HKCU\Control Panel\Desktop" /v AutoEndTasks /t REG_SZ /d 1 /f | Out-Null
 reg add "HKCU\Control Panel\Desktop" /v HungAppTimeout /t REG_SZ /d 2000 /f | Out-Null
@@ -1440,3 +1445,4 @@ if ($script:RunProfile -eq "Extreme") {
 } else {
     Write-Host (Paint "   >>> SAFE APPLIED LIVE. NO RESTART REQUIRED. <<<" $S.Green)
 }
+
