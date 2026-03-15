@@ -253,7 +253,7 @@ function Start-SectionSpinner([string]$Text, [string]$Color, [switch]$UseDetailL
 
 function Update-SectionSpinner([string]$Detail, [int]$Tick) {
     if (-not (Test-CanAnimate)) { return }
-    if ($script:ActiveSectionRow -lt 0) { return }
+    if ($script:ActiveSectionRow -lt 0 -and $script:ActiveDetailRow -lt 0) { return }
 
     $frames = Get-UsableSpinnerFrames
     $frame = $frames[$Tick % $frames.Count]
@@ -281,25 +281,23 @@ function Update-SectionSpinner([string]$Detail, [int]$Tick) {
 function Invoke-VerboseSectionSpinBurst([int]$FrameCount = 4) {
     if (-not $VerboseOutput) { return }
     if (-not (Test-CanAnimate)) { return }
-    if ($script:ActiveSectionRow -lt 0) { return }
+    if ([string]::IsNullOrWhiteSpace($script:ActiveSectionText)) { return }
 
     $frames = Get-UsableSpinnerFrames
     if ($frames.Count -eq 0) { return }
 
     $start = $script:SectionSpinSeed % $frames.Count
     $script:SectionSpinSeed = ($script:SectionSpinSeed + $FrameCount) % $frames.Count
-    $currentTop = [Console]::CursorTop
-    $currentLeft = [Console]::CursorLeft
+    $lastFrame = $frames[$start]
 
     try {
         for ($i = 0; $i -lt $FrameCount; $i++) {
             $frame = $frames[($start + $i) % $frames.Count]
-            [Console]::SetCursorPosition(0, $script:ActiveSectionRow)
-            [Console]::Write((Format-SectionSpinnerLine -Frame $frame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
-            [Console]::Out.Flush()
+            $lastFrame = $frame
+            Microsoft.PowerShell.Utility\Write-Host -NoNewline ("`r" + (Format-SectionSpinnerLine -Frame $frame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
             Start-Sleep -Milliseconds 80
         }
-        [Console]::SetCursorPosition($currentLeft, $currentTop)
+        Microsoft.PowerShell.Utility\Write-Host ("`r" + (Format-SectionSpinnerLine -Frame $lastFrame -Text $script:ActiveSectionText -Color $script:ActiveSectionColor))
     } catch {}
 }
 
@@ -433,18 +431,29 @@ function Show-SectionHeader([string]$Kind, [string]$Id, [string]$Message, [strin
     $rule = ("-" * $ruleWidth)
 
     Complete-SectionSpinner
-    Start-SectionSpinner -Text $sectionText -Color $AccentColor -UseDetailLine:$UseDetailLine
-    Write-Host (Paint $rule $S.Slate)
-    if ($UseDetailLine) {
-        Write-Host (Format-SectionDetailLine -Detail "")
-        if (Test-CanAnimate) {
-            try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
-        }
-    }
     if ($VerboseOutput) {
-        $frameCount = if ($UseDetailLine) { 4 } else { 5 }
+        $script:ActiveSectionText = $sectionText
+        $script:ActiveSectionColor = $AccentColor
+        $script:ActiveSectionRow = -1
+        $script:ActiveDetailRow = -1
+        $frameCount = if ($UseDetailLine) { 5 } else { 6 }
         Invoke-VerboseSectionSpinBurst -FrameCount $frameCount
+        Write-Host (Paint $rule $S.Slate)
+        if ($UseDetailLine) {
+            Write-Host (Format-SectionDetailLine -Detail "")
+            if (Test-CanAnimate) {
+                try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
+            }
+        }
     } else {
+        Start-SectionSpinner -Text $sectionText -Color $AccentColor -UseDetailLine:$UseDetailLine
+        Write-Host (Paint $rule $S.Slate)
+        if ($UseDetailLine) {
+            Write-Host (Format-SectionDetailLine -Detail "")
+            if (Test-CanAnimate) {
+                try { $script:ActiveDetailRow = [Console]::CursorTop - 1 } catch { $script:ActiveDetailRow = -1 }
+            }
+        }
         Start-HeaderSpinnerTimer
         Start-Sleep -Milliseconds 120
     }
