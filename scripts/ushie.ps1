@@ -1747,7 +1747,6 @@ if (-not $VerboseOutput) {
     Show-Banner
 }
 Write-Host ""
-Write-Host (Paint "   Ushie pass complete. No persistent background task created." $S.Green)
 Write-Host ((Paint "   Backup path: " $S.Cyan) + $backupDir)
 if ($script:RunProfile -eq "Extreme") {
     Write-Host (Paint "   Extreme applied. Restart to lock in boot-level tweaks." $S.Yellow)
